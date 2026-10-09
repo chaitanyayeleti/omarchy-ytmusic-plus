@@ -7,6 +7,22 @@ the local work, newest first.
 
 ---
 
+## v2.9.0 — Material pass
+
+- Material 3 design language with Omarchy theme colors (shape tokens,
+  emphasized/standard cubic-bezier motion tokens, state layers).
+- `Ripple` inline component: mirrors any MouseArea's press and paints an
+  expanding ink circle; input-transparent and self-clipping, so it drops
+  in beside existing click/hover/tooltip wiring. Attached across dock,
+  transport, rows, chips, buttons, settings controls and the manager.
+- Buttons: filled primary / tonal active / 8% ink hover state layer;
+  outlines removed from card, chips, follow pill, YT chip, cycles, toggles.
+- Volume: M3 slider (track, handle, drag, wheel, value bubble) replaces
+  the −/70/+ cluster.
+- Shape scale unified (8 px containers), seek bar 4/6 px + 12 px handle.
+
+---
+
 ## v2.8.0 — Optimization pass
 
 - status: 5 jq → 2 (batched settings read; single position+pause extract)

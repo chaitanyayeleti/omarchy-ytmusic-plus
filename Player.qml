@@ -36,7 +36,14 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.8.0 stable"
+  readonly property string appVersion: "v2.9.0 stable"
+  // Material shape + motion tokens. Colors stay Omarchy theme tokens — this
+  // is Material's design language (geometry, state layers, motion), not
+  // Material You's wallpaper-derived palette.
+  readonly property int easeStandard: Easing.BezierSpline
+  readonly property var easeStandardCurve: [0.2, 0, 0, 1]
+  readonly property int easeEmphasized: Easing.BezierSpline
+  readonly property var easeEmphasizedCurve: [0.05, 0.7, 0.1, 1]
 
   property bool opened: false
   property bool searching: false
@@ -2102,12 +2109,11 @@ Item {
     anchors.fill: parent
     color: root.surface
     radius: Style.cornerRadius
-    border.width: 1
-    border.color: root.border
+    // Material: no inner outline — the popup panel frame is the only border.
     clip: true
     transformOrigin: Item.Center
     scale: root.opened ? 1 : 0.985
-    Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(220); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
 
     // Ambient backdrop: the current artwork, blurred and dimmed, sits behind
     // every surface (replaces the old flat 5% image). GPU-only via
@@ -2202,8 +2208,8 @@ Item {
               height: parent.height - Style.space(8)
               radius: height / 2
               color: root.accent
-              Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-              Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+              Behavior on x { NumberAnimation { duration: Style.duration(250); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
+              Behavior on width { NumberAnimation { duration: Style.duration(250); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
             }
 
             Row {
@@ -2254,6 +2260,7 @@ Item {
                     onExited: if (root.hoveredTab === index) root.hoveredTab = -1
                     onClicked: root.setTab(index)
                   }
+                  Ripple { source: dockHover; strength: 0.14 }
                   InfoTip { watched: dockHover; tipText: modelData.label + "  ·  " + (index + 1) }
                 }
               }
@@ -2352,6 +2359,7 @@ Item {
                   searchField.forceActiveFocus()
                 }
               }
+              Ripple { source: clearHover; strength: 0.12 }
               InfoTip { watched: clearHover; tipText: "Clear search" }
             }
           }
@@ -2401,6 +2409,7 @@ Item {
               Behavior on opacity { NumberAnimation { duration: 120 } }
               Text { anchors.centerIn: parent; text: "Import"; color: root.onAccent; font.family: root.uiFont; font.pixelSize: Style.font.caption; font.bold: true }
               MouseArea { id: importHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.importPlaylist() }
+              Ripple { source: importHover; color: root.onAccent; strength: 0.24 }
             }
           }
         }
@@ -2520,14 +2529,13 @@ Item {
               height: 24
               width: npFollowLabel.width + 20
               radius: 12
-              color: root.currentFollowed ? root.accent : "transparent"
-              border.width: 1
-              border.color: root.currentFollowed ? root.accent : root.muted
+              // Material: filled when following, tonal when not.
+              color: root.currentFollowed ? root.accent : root.raised
               anchors.verticalCenter: parent.verticalCenter
               transformOrigin: Item.Center
               scale: npFollowHover.pressed ? 0.9 : 1.0
-              Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutBack } }
-              Behavior on color { ColorAnimation { duration: 120 } }
+              Behavior on scale { NumberAnimation { duration: Style.duration(150); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
+              Behavior on color { ColorAnimation { duration: Style.duration(120) } }
               Text {
                 id: npFollowLabel
                 anchors.centerIn: parent
@@ -2563,6 +2571,7 @@ Item {
                   if (root.homeMode === "artist") root.reloadArtists()
                 }
               }
+              Ripple { source: npFollowHover; color: root.currentFollowed ? root.onAccent : root.ink; strength: root.currentFollowed ? 0.24 : 0.12 }
               InfoTip { watched: npFollowHover; tipText: root.currentFollowed ? "Following - tap to unfollow" : "Follow artist" }
             }
             }
@@ -2596,7 +2605,7 @@ Item {
               Rectangle {
                 id: seekBar
                 width: Math.max(Style.space(40), parent.width - Style.space(34) * 2 - timeRow.spacing * 2)
-                height: seekHover.containsMouse ? Style.space(5) : Style.space(3)
+                height: seekHover.containsMouse ? Style.space(6) : Style.space(4)
                 radius: height / 2
                 color: root.raised
                 anchors.verticalCenter: parent.verticalCenter
@@ -2611,8 +2620,8 @@ Item {
                 }
                 Rectangle {
                   id: seekKnob
-                  width: Style.space(10)
-                  height: Style.space(10)
+                  width: Style.space(12)
+                  height: Style.space(12)
                   radius: width / 2
                   color: root.accent
                   border.color: root.surface
@@ -2730,49 +2739,90 @@ Item {
                   tapped: function() { root.cycleLoop() }
                 }
               }
-              Row {
+              // Material slider: 4px track (6px while pressed), accent active
+              // fill, 12px handle, drag + wheel, value bubble on interaction.
+              Item {
+                id: volumeSlider
+                width: Style.space(84)
+                height: parent.height
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(5)
-                Text {
-                  text: "-"
-                  color: volDown.containsMouse ? root.accent : root.muted
-                  font.family: root.uiFont
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
+                readonly property real ratio: Math.max(0, Math.min(1, root.setVolume / 100))
+                readonly property bool interacting: volSliderHover.pressed || volSliderHover.containsMouse
+
+                Rectangle {
+                  id: volTrack
+                  width: parent.width - Style.space(8)
+                  height: volSliderHover.pressed ? Style.space(6) : Style.space(4)
+                  radius: height / 2
+                  color: root.raised
+                  anchors.centerIn: parent
+                  Behavior on height { NumberAnimation { duration: Style.duration(120); easing.type: root.easeStandard; easing.bezierCurve: root.easeStandardCurve } }
+                  Rectangle {
+                    width: parent.width * volumeSlider.ratio
+                    height: parent.height
+                    radius: height / 2
+                    color: root.accent
+                    Behavior on width { NumberAnimation { duration: Style.duration(120); easing.type: root.easeStandard; easing.bezierCurve: root.easeStandardCurve } }
+                  }
+                }
+                Rectangle {
+                  id: volHandle
+                  width: Style.space(12)
+                  height: width
+                  radius: width / 2
+                  color: root.accent
+                  x: volTrack.x + volTrack.width * volumeSlider.ratio - width / 2
                   anchors.verticalCenter: parent.verticalCenter
-                  Behavior on color { ColorAnimation { duration: 120 } }
-                  MouseArea { id: volDown; anchors.fill: parent; anchors.margins: -Style.space(5); hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.nudgeVolume(-5) }
-                  InfoTip { watched: volDown; tipText: "Quieter" }
+                  scale: volSliderHover.pressed ? 1.25 : (volSliderHover.containsMouse ? 1.1 : 1.0)
+                  Behavior on scale { NumberAnimation { duration: Style.duration(120); easing.type: root.easeStandard; easing.bezierCurve: root.easeStandardCurve } }
                 }
                 Text {
-                  width: Style.space(30)
-                  horizontalAlignment: Text.AlignHCenter
+                  visible: volumeSlider.interacting
                   text: String(root.setVolume)
                   textFormat: Text.PlainText
-                  color: root.muted
+                  color: root.onAccent
                   font.family: root.uiFont
                   font.pixelSize: Style.font.caption
-                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(24)
+                  height: Style.space(15)
+                  horizontalAlignment: Text.AlignHCenter
+                  verticalAlignment: Text.AlignVCenter
+                  x: Math.max(0, Math.min(volumeSlider.width - width, volHandle.x + volHandle.width / 2 - width / 2))
+                  y: -height - Style.space(3)
+                  z: 5
+                  Rectangle {
+                    z: -1
+                    anchors.fill: parent
+                    radius: height / 2
+                    color: root.surface
+                    border.width: 1
+                    border.color: root.border
+                  }
                 }
-                Text {
-                  text: "+"
-                  color: volUp.containsMouse ? root.accent : root.muted
-                  font.family: root.uiFont
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                  anchors.verticalCenter: parent.verticalCenter
-                  Behavior on color { ColorAnimation { duration: 120 } }
-                  MouseArea { id: volUp; anchors.fill: parent; anchors.margins: -Style.space(5); hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.nudgeVolume(5) }
-                  InfoTip { watched: volUp; tipText: "Louder" }
+                MouseArea {
+                  id: volSliderHover
+                  anchors.fill: parent
+                  anchors.topMargin: -Style.space(6)
+                  anchors.bottomMargin: -Style.space(6)
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  function setFromX(px) {
+                    var r = Math.max(0, Math.min(1, (px - volTrack.x) / Math.max(1, volTrack.width)))
+                    var target = Math.round(r * 100 / 5) * 5
+                    if (target !== root.setVolume) root.nudgeVolume(target - root.setVolume)
+                  }
+                  onPressed: function(mouse) { setFromX(mouse.x) }
+                  onPositionChanged: function(mouse) { if (pressed) setFromX(mouse.x) }
                 }
-                // Scroll over the volume cluster: fast, precise nudges.
+                // Scroll over the slider: fast, precise nudges.
                 WheelHandler {
                   onWheel: function(event) {
                     if (event.angleDelta.y === 0) return
                     root.nudgeVolume(event.angleDelta.y > 0 ? 5 : -5)
                   }
                 }
+                InfoTip { watched: volSliderHover; tipText: "Volume — drag or scroll" }
               }
               Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -2945,27 +2995,26 @@ Item {
               width: Style.space(70)
               height: parent.height
               radius: height / 2
-              color: createHover.containsMouse ? root.accent : "transparent"
-              border.width: 1
-              border.color: root.accent
+              // Material filled button.
+              color: createHover.containsMouse ? Qt.lighter(root.accent, 1.12) : root.accent
               transformOrigin: Item.Center
               scale: createHover.pressed ? 0.95 : 1.0
-              Behavior on color { ColorAnimation { duration: 120 } }
-              Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutBack } }
-              Text { anchors.centerIn: parent; text: "+ Create"; color: createHover.containsMouse ? root.onAccent : root.accent; font.family: root.uiFont; font.pixelSize: Style.font.caption; Behavior on color { ColorAnimation { duration: 120 } } }
+              Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+              Behavior on scale { NumberAnimation { duration: Style.duration(150); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
+              Text { anchors.centerIn: parent; text: "+ Create"; color: root.onAccent; font.family: root.uiFont; font.pixelSize: Style.font.caption; font.bold: true }
               MouseArea { id: createHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.createPlaylist() }
+              Ripple { source: createHover; color: root.onAccent; strength: 0.24 }
             }
             Rectangle {
               width: Style.space(62)
               height: parent.height
               radius: height / 2
-              color: root.openPlaylistName ? root.accent : "transparent"
-              border.width: 1
-              border.color: root.accent
-              opacity: root.openPlaylistName ? 1 : 0.4
+              // Material: filled when enabled, tonal when disabled.
+              color: root.openPlaylistName ? root.accent : root.raised
               enabled: root.openPlaylistName !== ""
-              Text { anchors.centerIn: parent; text: "▶ Play"; color: root.openPlaylistName ? root.onAccent : root.accent; font.family: root.uiFont; font.pixelSize: Style.font.caption }
-              MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.playPlaylist(root.openPlaylistName) }
+              Text { anchors.centerIn: parent; text: "▶ Play"; color: root.openPlaylistName ? root.onAccent : root.muted; font.family: root.uiFont; font.pixelSize: Style.font.caption; font.bold: root.openPlaylistName !== "" }
+              MouseArea { id: playListHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.playPlaylist(root.openPlaylistName) }
+              Ripple { source: playListHover; color: root.openPlaylistName ? root.onAccent : root.ink; strength: root.openPlaylistName ? 0.24 : 0.12 }
             }
           }
         }
@@ -2985,9 +3034,8 @@ Item {
               height: Style.space(26)
               width: chipText.width + Style.space(16)
               radius: height / 2
-              color: root.openPlaylistName === name ? root.accent : "transparent"
-              border.width: 1
-              border.color: root.openPlaylistName === name ? root.accent : root.muted
+              // Material: selected = filled, rest = tonal.
+              color: root.openPlaylistName === name ? root.accent : root.raised
               Text {
                 id: chipText
                 anchors.centerIn: parent
@@ -2997,7 +3045,8 @@ Item {
                 font.family: root.uiFont
                 font.pixelSize: Style.font.caption
               }
-              MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.openPlaylist(name) }
+              MouseArea { id: chipHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.openPlaylist(name) }
+              Ripple { source: chipHover; color: root.openPlaylistName === name ? root.onAccent : root.ink; strength: root.openPlaylistName === name ? 0.24 : 0.12 }
             }
           }
         }
@@ -3305,7 +3354,7 @@ Item {
                     required property string genre
                     width: ListView.view ? ListView.view.width : 0
                     height: Style.space(48)
-                    radius: Style.space(7)
+                    radius: Style.space(8)
                     color: artistFindHover.containsMouse ? root.raised : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Row {
@@ -3347,6 +3396,7 @@ Item {
                       cursorShape: Qt.PointingHandCursor
                       onClicked: root.loadArtistProfile(name)
                     }
+                    Ripple { source: artistFindHover; strength: 0.10 }
                   }
                 }
                 Text {
@@ -3389,7 +3439,7 @@ Item {
                       Rectangle {
                         width: Style.space(42)
                         height: width
-                        radius: Style.space(7)
+                        radius: Style.space(8)
                         color: root.raised
                         clip: true
                         anchors.verticalCenter: parent.verticalCenter
@@ -3513,7 +3563,7 @@ Item {
                     required property string art
                     width: GridView.view.cellWidth - Style.space(4)
                     height: Style.space(60)
-                    radius: Style.space(7)
+                    radius: Style.space(8)
                     color: artistCellHover.containsMouse ? root.raised : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Row {
@@ -3575,6 +3625,7 @@ Item {
                       cursorShape: Qt.PointingHandCursor
                       onClicked: root.loadArtistProfile(name)
                     }
+                    Ripple { source: artistCellHover; strength: 0.10 }
                   }
                 }
                 ListView {
@@ -3596,7 +3647,7 @@ Item {
                     required property string kind
                     width: ListView.view ? ListView.view.width : 0
                     height: Style.space(48)
-                    radius: Style.space(7)
+                    radius: Style.space(8)
                     color: artistSongHover.containsMouse ? root.raised : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Row {
@@ -3674,6 +3725,7 @@ Item {
                       cursorShape: Qt.PointingHandCursor
                       onClicked: root.playArtistSong(index)
                     }
+                    Ripple { source: artistSongHover; strength: 0.10 }
                   }
                 }
                 Text {
@@ -3767,7 +3819,7 @@ Item {
                 required property var modelData
                 width: parent.width
                 height: Style.space(38)
-                radius: Style.space(7)
+                radius: Style.space(8)
                 color: root.raised
                 Column {
                   anchors.fill: parent
@@ -3811,6 +3863,7 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.dlRetry(modelData)
                       }
+                      Ripple { source: dlRetryHover; strength: 0.12 }
                       InfoTip { watched: dlRetryHover; tipText: "Retry download" }
                     }
                     Text {
@@ -3826,6 +3879,7 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.dlCancel(modelData.videoId)
                       }
+                      Ripple { source: dlCancelHover; strength: 0.12 }
                       InfoTip { watched: dlCancelHover; tipText: modelData.state === "downloading" ? "Cancel download" : "Dismiss" }
                     }
                   }
@@ -4471,10 +4525,9 @@ Item {
     width: Style.space(42)
     height: Style.space(23)
     radius: height / 2
-    color: stog.on ? root.accent : "transparent"
-    border.width: 1
-    border.color: stog.on ? root.accent : root.muted
-    Behavior on color { ColorAnimation { duration: 140 } }
+    // Material switch: tonal track off, accent track on, no outline.
+    color: stog.on ? root.accent : root.raised
+    Behavior on color { ColorAnimation { duration: Style.duration(140) } }
     Rectangle {
       width: Style.space(15)
       height: width
@@ -4482,9 +4535,10 @@ Item {
       x: stog.on ? parent.width - width - Style.space(4) : Style.space(4)
       anchors.verticalCenter: parent.verticalCenter
       color: stog.on ? root.onAccent : root.muted
-      Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+      Behavior on x { NumberAnimation { duration: Style.duration(160); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
     }
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (stog.flipped) stog.flipped() }
+    MouseArea { id: toggHover; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (stog.flipped) stog.flipped() }
+    Ripple { source: toggHover; strength: 0.12 }
   }
 
   component SettingStepper: Row {
@@ -4535,13 +4589,12 @@ Item {
     width: cycLabel.width + Style.space(22)
     height: Style.space(26)
     radius: height / 2
-    color: "transparent"
-    border.width: 1
-    border.color: cycHover.containsMouse ? root.accent : root.muted
+    // Material tonal button: filled container, no outline.
+    color: cycHover.containsMouse ? Qt.lighter(root.raised, 1.2) : root.raised
     transformOrigin: Item.Center
     scale: cycHover.pressed ? 0.96 : 1.0
-    Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutBack } }
-    Behavior on border.color { ColorAnimation { duration: 120 } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(150); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
+    Behavior on color { ColorAnimation { duration: Style.duration(120) } }
     Text {
       id: cycLabel
       anchors.centerIn: parent
@@ -4550,7 +4603,7 @@ Item {
       font.family: root.uiFont
       font.pixelSize: Style.font.caption
       font.bold: true
-      Behavior on color { ColorAnimation { duration: 120 } }
+      Behavior on color { ColorAnimation { duration: Style.duration(120) } }
     }
     MouseArea {
       id: cycHover
@@ -4563,6 +4616,7 @@ Item {
         cyc.picked(next)
       }
     }
+    Ripple { source: cycHover }
   }
 
   component SettingBtn: Rectangle {
@@ -4573,23 +4627,20 @@ Item {
     width: sbtnLabel.width + Style.space(hPad)
     height: Style.space(26)
     radius: height / 2
-    color: sbtnHover.containsMouse ? root.accent : "transparent"
-    border.width: 1
-    border.color: root.accent
+    // Material filled button.
+    color: sbtnHover.containsMouse ? Qt.lighter(root.accent, 1.12) : root.accent
     transformOrigin: Item.Center
     scale: sbtnHover.pressed ? 0.96 : 1.0
-    Behavior on color { ColorAnimation { duration: 120 } }
-    Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutBack } }
-    Behavior on border.color { ColorAnimation { duration: 120 } }
+    Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(150); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
     Text {
       id: sbtnLabel
       anchors.centerIn: parent
       text: sbtn.label
-      color: sbtnHover.containsMouse ? root.onAccent : root.accent
+      color: root.onAccent
       font.family: root.uiFont
       font.pixelSize: Style.font.caption
       font.bold: true
-      Behavior on color { ColorAnimation { duration: 120 } }
     }
     MouseArea {
       id: sbtnHover
@@ -4598,6 +4649,7 @@ Item {
       cursorShape: Qt.PointingHandCursor
       onClicked: if (sbtn.tapped) sbtn.tapped()
     }
+    Ripple { source: sbtnHover; color: root.onAccent; strength: 0.24 }
   }
 
   // Vertical center-zero EQ slider with drag. 0 dB sits mid-groove.
@@ -4709,6 +4761,63 @@ Item {
     }
   }
 
+  // Material state ripple: mirrors an existing MouseArea's press and paints
+  // an expanding ink circle (M3 state layer + ripple). Input-transparent and
+  // self-clipping, so it can be dropped beside any interactive item without
+  // touching its click/hover/tooltip wiring.
+  component Ripple: Item {
+    id: ripple
+    property var source: null
+    property color color: root.ink
+    property real strength: 0.16
+    anchors.fill: parent
+    clip: true
+    Rectangle {
+      id: rippleDot
+      width: 0
+      height: 0
+      radius: width / 2
+      color: ripple.color
+      opacity: 0
+      property real cx: 0
+      property real cy: 0
+      x: cx - width / 2
+      y: cy - height / 2
+    }
+    Connections {
+      target: ripple.source
+      function onPressed(mouse) {
+        var size = Math.max(ripple.width, ripple.height) * 1.8
+        rippleDot.cx = mouse.x
+        rippleDot.cy = mouse.y
+        rippleDot.width = 0
+        rippleDot.height = 0
+        rippleDot.opacity = ripple.strength
+        rippleGrow.size = size
+        rippleGrow.restart()
+      }
+    }
+    ParallelAnimation {
+      id: rippleGrow
+      property real size: 0
+      NumberAnimation {
+        target: rippleDot; property: "width"; to: rippleGrow.size
+        duration: Style.duration(320)
+        easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve
+      }
+      NumberAnimation {
+        target: rippleDot; property: "height"; to: rippleGrow.size
+        duration: Style.duration(320)
+        easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve
+      }
+      NumberAnimation {
+        target: rippleDot; property: "opacity"; to: 0
+        duration: Style.duration(420)
+        easing.type: root.easeStandard; easing.bezierCurve: root.easeStandardCurve
+      }
+    }
+  }
+
   component TransportBtn: Rectangle {
     id: tbtn
     required property string glyph
@@ -4724,21 +4833,22 @@ Item {
     radius: btnSize / 2
     transformOrigin: Item.Center
     scale: btnHover.pressed ? 0.9 : (btnHover.containsMouse ? 1.07 : 1.0)
+    // Material: filled primary, tonal active (accent container), 8% ink
+    // state layer on hover, no outlines.
     color: primary
-      ? (btnHover.containsMouse ? root.accent : "transparent")
-      : (btnHover.containsMouse ? root.raised : "transparent")
-    border.width: (primary || active) ? 2 : 1
-    border.color: primary ? root.accent : (active ? root.accent : (btnHover.containsMouse ? root.ink : root.muted))
-    Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutBack } }
-    Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
-    Behavior on border.color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      ? (btnHover.containsMouse ? Qt.lighter(root.accent, 1.12) : root.accent)
+      : (active
+          ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
+          : (btnHover.containsMouse ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08) : "transparent"))
+    Behavior on scale { NumberAnimation { duration: Style.duration(180); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
+    Behavior on color { ColorAnimation { duration: Style.duration(120) } }
     Text {
       anchors.centerIn: parent
       text: tbtn.glyph
-      color: (tbtn.primary && btnHover.containsMouse) ? root.onAccent : (tbtn.active ? root.accent : root.ink)
+      color: tbtn.primary ? root.onAccent : (tbtn.active ? root.accent : root.ink)
       font.family: root.iconFont
       font.pixelSize: tbtn.large ? Style.font.iconLarge : Style.font.bodySmall
-      Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      Behavior on color { ColorAnimation { duration: Style.duration(120) } }
     }
     MouseArea {
       id: btnHover
@@ -4747,6 +4857,7 @@ Item {
       cursorShape: Qt.PointingHandCursor
       onClicked: if (tbtn.tapped) tbtn.tapped()
     }
+    Ripple { source: btnHover; color: tbtn.primary ? root.onAccent : root.ink; strength: tbtn.primary ? 0.24 : 0.16 }
     InfoTip { watched: btnHover; tipText: tbtn.tip }
   }
 
@@ -4762,7 +4873,7 @@ Item {
     readonly property bool isRadio: kind === "radio"
     width: ListView.view ? ListView.view.width : 0
     height: reason !== "" ? Style.space(62) : Style.space(48)
-    radius: Style.space(7)
+    radius: Style.space(8)
     color: homeArea.containsMouse ? root.raised : "transparent"
     Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -4831,15 +4942,14 @@ Item {
         width: Style.space(34)
         height: Style.space(30)
         radius: height / 2
-        color: "transparent"
-        border.width: 1
-        border.color: ytHover.containsMouse ? root.accent : root.muted
+        // Material tonal chip.
+        color: ytHover.containsMouse ? Qt.lighter(root.raised, 1.2) : root.raised
         anchors.verticalCenter: parent.verticalCenter
         visible: !homeRow.isRadio
         transformOrigin: Item.Center
         scale: ytHover.pressed ? 0.94 : 1.0
-        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutBack } }
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on scale { NumberAnimation { duration: Style.duration(150); easing.type: root.easeEmphasized; easing.bezierCurve: root.easeEmphasizedCurve } }
+        Behavior on color { ColorAnimation { duration: Style.duration(120) } }
         Text {
           anchors.centerIn: parent
           text: "YT"
@@ -4847,7 +4957,7 @@ Item {
           font.family: root.uiFont
           font.pixelSize: Style.font.caption
           font.bold: true
-          Behavior on color { ColorAnimation { duration: 120 } }
+          Behavior on color { ColorAnimation { duration: Style.duration(120) } }
         }
         MouseArea {
           id: ytHover
@@ -4859,6 +4969,7 @@ Item {
             root.ytSearchAndPlay(r.artist + " " + r.title)
           }
         }
+        Ripple { source: ytHover; strength: 0.12 }
         InfoTip { watched: ytHover; tipText: "Full version on YouTube" }
       }
     }
@@ -4870,6 +4981,7 @@ Item {
       cursorShape: Qt.PointingHandCursor
       onClicked: root.playHome(homeRow.index)
     }
+    Ripple { source: homeArea; strength: 0.10 }
   }
 
   component TrackRow: Rectangle {
@@ -4885,7 +4997,7 @@ Item {
     width: ListView.view ? ListView.view.width : 0
     height: Style.space(46)
     opacity: (root.queueAligned && index < root.currentIndex) ? 0.45 : 1
-    radius: Style.space(7)
+    radius: Style.space(8)
     readonly property bool rowHovered: trackArea.containsMouse || mixArea.containsMouse || saveArea.containsMouse || listArea.containsMouse || dlArea.containsMouse
     readonly property bool isCurrent: trackRow.videoId === root.currentVideoId
     color: index === root.selectedIndex ? root.raised : (rowHovered ? root.raised : "transparent")
@@ -4991,6 +5103,7 @@ Item {
       cursorShape: Qt.PointingHandCursor
       onClicked: { root.selectedIndex = trackRow.index; root.selectTrack(trackRow.index) }
     }
+    Ripple { source: trackArea; strength: 0.10 }
   }
 }
 

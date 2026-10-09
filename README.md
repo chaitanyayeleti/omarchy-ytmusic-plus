@@ -32,8 +32,10 @@ Privacy-first, login-free YouTube music player for the Omarchy bar.
   keys and full in-player keyboard shortcuts
 - **Themed**: every surface uses `Color.*` / `Style.*` tokens — theme switches
   repaint the player, nothing is hardcoded
-- **Modern**: icon dock with hover labels, blurred artwork backdrop,
-  scrub-preview seek bar, and shortcut hints in tooltips
+- **Modern**: Material 3 design language in your Omarchy theme's colors —
+  ripples, tonal surfaces, filled/tonal buttons, an M3 volume slider,
+  icon dock with hover labels, blurred artwork backdrop and a
+  scrub-preview seek bar
 
 ## Updates
 
