@@ -1,13 +1,28 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **25** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable)
+Updates so far: **26** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.4.0 stable (current)
+## v2.5.0 stable (current)
+
+> Interaction polish: seeking shows where you're going, feedback sits in
+> a pill, empty tabs wear their own icon, and the search box got its
+> standard furniture.
+
+- Seek bar: scrub-preview bubble with the target time follows the pointer
+- Notice/error feedback as an accent/red pill (elided, full text in
+  tooltip) instead of a bare colored line
+- Empty states: the tab's own dimmed glyph above the guidance text
+- Search field: leading magnifier (accents on focus) + one-tap clear
+- Volume: scroll-wheel nudges over the volume cluster
+- Tooltips carry the shortcut: Play/Pause · Space, Save · F, Download · D,
+  dock tabs · 1–8
+
+## v2.4.0 stable
 
 > Modern face: the dock becomes a strip of icons with hover labels, and
 > the current artwork washes the whole player in a soft blur.

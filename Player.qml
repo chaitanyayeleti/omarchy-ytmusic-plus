@@ -36,7 +36,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.4.0 stable"
+  readonly property string appVersion: "v2.5.0 stable"
 
   property bool opened: false
   property bool searching: false
@@ -2179,7 +2179,7 @@ Item {
                     onExited: if (root.hoveredTab === index) root.hoveredTab = -1
                     onClicked: root.setTab(index)
                   }
-                  InfoTip { watched: dockHover; tipText: modelData.label }
+                  InfoTip { watched: dockHover; tipText: modelData.label + "  ·  " + (index + 1) }
                 }
               }
             }
@@ -2199,12 +2199,23 @@ Item {
             color: root.raised
             border.width: searchField.activeFocus ? 1 : 0
             border.color: root.ink
+            // Leading magnifier: accents on focus so the field reads alive.
+            Text {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(11)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰍉"
+              color: searchField.activeFocus ? root.accent : root.muted
+              font.family: root.iconFont
+              font.pixelSize: Style.font.bodySmall
+              Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+            }
             TextInput {
               id: searchField
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(13)
+              anchors.leftMargin: Style.space(31)
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(13)
+              anchors.rightMargin: Style.space(32)
               anchors.verticalCenter: parent.verticalCenter
               color: root.ink
               selectionColor: root.accent
@@ -2231,6 +2242,42 @@ Item {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { searchDebounce.stop(); root.search(); event.accepted = true }
                 else if (event.key === Qt.Key_Down && tracks.count > 0) { root.selectedIndex = 0; resultList.forceActiveFocus(); event.accepted = true }
               }
+            }
+            // One-tap clear: only while there is something to clear.
+            Item {
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(7)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(19)
+              height: Style.space(19)
+              visible: searchField.text !== ""
+              opacity: visible ? 1 : 0
+              Behavior on opacity { NumberAnimation { duration: Style.duration(120) } }
+              Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: clearHover.containsMouse ? root.raised : "transparent"
+              }
+              Text {
+                anchors.centerIn: parent
+                text: "󰅖"
+                color: clearHover.containsMouse ? root.ink : root.muted
+                font.family: root.iconFont
+                font.pixelSize: Style.font.caption
+                Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+              }
+              MouseArea {
+                id: clearHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  searchDebounce.stop()
+                  searchField.text = ""
+                  searchField.forceActiveFocus()
+                }
+              }
+              InfoTip { watched: clearHover; tipText: "Clear search" }
             }
           }
 
@@ -2345,7 +2392,7 @@ Item {
                   else root.saveCurrent()
                 }
               }
-              InfoTip { watched: npSaveHover; tipText: root.currentSaved ? "Remove from Favourite" : "Save to Favourite" }
+              InfoTip { watched: npSaveHover; tipText: (root.currentSaved ? "Remove from Favourite" : "Save to Favourite") + "  ·  F" }
             }
             // download
             Text {
@@ -2366,7 +2413,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.downloadCurrent()
               }
-              InfoTip { watched: npDlHover; tipText: "Download offline (opus)" }
+              InfoTip { watched: npDlHover; tipText: "Download offline (opus)  ·  D" }
             }
             // follow toggle
             Rectangle {
@@ -2489,6 +2536,32 @@ Item {
                   transparentBorder: true
                   visible: seekKnob.visible
                 }
+                // Scrub preview: a time bubble follows the pointer so seeking
+                // is precise instead of guesswork. Clamped to the bar's ends.
+                Rectangle {
+                  id: seekTip
+                  z: 10
+                  width: seekTipLabel.width + Style.space(12)
+                  height: Style.space(18)
+                  radius: height / 2
+                  color: root.surface
+                  border.width: 1
+                  border.color: root.border
+                  x: Math.max(-width / 2, Math.min(parent.width - width / 2, seekHover.mouseX - width / 2))
+                  y: -height - Style.space(5)
+                  opacity: (seekHover.containsMouse && root.playbackDuration > 0) ? 1 : 0
+                  visible: opacity > 0.01
+                  Behavior on opacity { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
+                  Text {
+                    id: seekTipLabel
+                    anchors.centerIn: parent
+                    text: root.formatTime(Math.max(0, Math.min(1, seekHover.mouseX / Math.max(1, seekBar.width))) * root.playbackDuration)
+                    textFormat: Text.PlainText
+                    color: root.ink
+                    font.family: root.uiFont
+                    font.pixelSize: Style.font.caption
+                  }
+                }
                 // Scrub like a video timeline: click or drag anywhere.
                 MouseArea {
                   id: seekHover
@@ -2539,7 +2612,7 @@ Item {
                   btnSize: Style.space(44)
                   primary: true
                   large: true
-                  tip: root.playing ? "Pause" : "Play"
+                  tip: (root.playing ? "Pause" : "Play") + "  ·  Space"
                   tapped: function() { root.togglePlayback() }
                 }
                 TransportBtn {
@@ -2592,6 +2665,13 @@ Item {
                   Behavior on color { ColorAnimation { duration: 120 } }
                   MouseArea { id: volUp; anchors.fill: parent; anchors.margins: -Style.space(5); hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.nudgeVolume(5) }
                   InfoTip { watched: volUp; tipText: "Louder" }
+                }
+                // Scroll over the volume cluster: fast, precise nudges.
+                WheelHandler {
+                  onWheel: function(event) {
+                    if (event.angleDelta.y === 0) return
+                    root.nudgeVolume(event.angleDelta.y > 0 ? 5 : -5)
+                  }
                 }
               }
               Text {
@@ -2693,20 +2773,32 @@ Item {
             font.pixelSize: Style.font.bodySmall
             font.bold: true
           }
-          Text {
+          // Feedback pill: notice (accent) or error (red) washes in behind
+          // short status text instead of a bare colored line. Elides, with
+          // the full text in the hover tooltip.
+          Rectangle {
+            id: statusPill
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.notice || root.errorMessage
-            textFormat: Text.PlainText
+            width: Math.min(parent.width * 0.6, statusLabel.implicitWidth + Style.space(16))
+            height: Style.space(16)
+            radius: height / 2
             color: root.notice ? root.accent : "#ff7a7a"
-            font.family: root.uiFont
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-            width: Math.min(parent.width * 0.55, implicitWidth)
-            horizontalAlignment: Text.AlignRight
-            visible: (root.notice !== "" || root.errorMessage !== "")
-            opacity: visible ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            opacity: statusLabel.text !== "" ? 0.14 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: Style.duration(150); easing.type: Easing.OutCubic } }
+            Text {
+              id: statusLabel
+              anchors.centerIn: parent
+              width: Math.min(parent.width - Style.space(12), implicitWidth)
+              text: root.notice || root.errorMessage
+              textFormat: Text.PlainText
+              color: root.notice ? root.accent : "#ff7a7a"
+              font.family: root.uiFont
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              horizontalAlignment: Text.AlignHCenter
+            }
             MouseArea { id: statusHover; anchors.fill: parent; hoverEnabled: true }
             InfoTip { watched: statusHover; tipText: root.notice || root.errorMessage; delayMs: 400 }
           }
@@ -4035,26 +4127,50 @@ Item {
           }
         }
 
-        Text {
+        // Empty state: a big dimmed glyph of the tab's own dock icon over the
+        // guidance text, so an empty tab still reads as that tab.
+        Item {
           width: parent.width
           height: visible ? parent.height - y - Style.space(18) : 0
           visible: tracks.count === 0 && !root.searching && root.tabIndex !== 0 && root.tabIndex !== 6 && root.tabIndex !== 7
-          textFormat: Text.PlainText
-          lineHeight: 1.35
           opacity: visible ? 1 : 0
-          Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-          text: {
-            if (root.tabIndex === 1) return "Search for something worth hearing\nResults build a mix station - no login needed"
-            if (root.tabIndex === 2) return "Queue is empty - play something from Find\nYour picks line up here"
-            if (root.tabIndex === 3) return playlists.count > 0 ? "Pick a list, or import a YouTube playlist above\nPaste a link in the import box to begin" : "Create a list, or import a YouTube playlist above\nUse + Create or paste a link above"
-            if (root.tabIndex === 4) return "Nothing loved yet - press the heart icon on any track\nSaved songs live here"
-            return "No downloads yet - press the download icon on any track\nOffline opus files are listed here"
+          Behavior on opacity { NumberAnimation { duration: Style.duration(150); easing.type: Easing.OutCubic } }
+          Column {
+            anchors.centerIn: parent
+            width: parent.width
+            spacing: Style.space(8)
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: {
+                if (root.tabIndex === 1) return "󰍉"
+                if (root.tabIndex === 2) return "󰐑"
+                if (root.tabIndex === 3) return "󰲸"
+                if (root.tabIndex === 4) return "󰣐"
+                return "󰇚"
+              }
+              color: root.muted
+              opacity: 0.3
+              font.family: root.iconFont
+              font.pixelSize: Style.font.iconLarge * 2
+            }
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              lineHeight: 1.35
+              text: {
+                if (root.tabIndex === 1) return "Search for something worth hearing\nResults build a mix station - no login needed"
+                if (root.tabIndex === 2) return "Queue is empty - play something from Find\nYour picks line up here"
+                if (root.tabIndex === 3) return playlists.count > 0 ? "Pick a list, or import a YouTube playlist above\nPaste a link in the import box to begin" : "Create a list, or import a YouTube playlist above\nUse + Create or paste a link above"
+                if (root.tabIndex === 4) return "Nothing loved yet - press the heart icon on any track\nSaved songs live here"
+                return "No downloads yet - press the download icon on any track\nOffline opus files are listed here"
+              }
+              color: root.muted
+              font.family: root.uiFont
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+              wrapMode: Text.WordWrap
+            }
           }
-          color: root.muted
-          font.family: root.uiFont
-          font.pixelSize: Style.font.body
-          horizontalAlignment: Text.AlignHCenter
-          wrapMode: Text.WordWrap
         }
 
         // Bottom bar: version bottom-left, credit bottom-center (kept short so
