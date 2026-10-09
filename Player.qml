@@ -36,7 +36,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.7.0 stable"
+  readonly property string appVersion: "v2.8.0 stable"
 
   property bool opened: false
   property bool searching: false
@@ -2031,7 +2031,10 @@ Item {
   }
 
   Timer {
-    interval: root.tabIndex === 6 ? 450 : 1500
+    // 600 ms on the lyrics tab: the 100 ms lyric ticker interpolates between
+    // polls, so this is pure drift correction — and each poll now costs
+    // fewer processes after the v2.8.0 backend pass.
+    interval: root.tabIndex === 6 ? 600 : 1500
     running: root.opened
     repeat: true
     triggeredOnStart: true

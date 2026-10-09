@@ -1,13 +1,33 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **29** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable → v2.6.0 stable → v2.7.0 stable)
+Updates so far: **30** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable → v2.6.0 stable → v2.7.0 stable → v2.8.0 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.7.0 stable (current)
+## v2.8.0 stable (current)
+
+> Under the hood: the hottest paths got cheaper — status polls and process
+> checks no longer spawn a process per step, and downloads kill cleanly.
+
+- `status` (polled by bar + player): one jq for loop/silence/normalize
+  (was three) and one jq for position+pause (was two)
+- `build_dsp_args`: one settings read for volume/loop/silence/normalize
+  (was five jq calls on every track launch)
+- `maybe_snapshot`: idle fast path — with nothing playing and a fresh
+  session snapshot, the comparison jq is skipped entirely; the session
+  mtime is kept warm so the fast path stays effective
+- `is_our_mpv` / `dl_pid_is_ytdlp`: builtin /proc reads instead of
+  `tr | grep` (~24× faster, used in 50 ms kill/retry loops)
+- `dl-get`/`dl-cancel`: dropped `setsid` (it can fork, making `$!` a
+  short-lived parent and breaking pid tracking); cancel now kills
+  yt-dlp's children (ffmpeg) explicitly before the parent
+- Lyrics-tab status poll 450 → 600 ms (the 100 ms lyric ticker
+  interpolates between polls, so this is only drift correction)
+
+## v2.7.0 stable
 
 > Downloads grow up: live progress, cancel and retry in the Local tab —
 > and transfers no longer block playback.

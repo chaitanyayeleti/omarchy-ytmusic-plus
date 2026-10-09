@@ -7,6 +7,22 @@ the local work, newest first.
 
 ---
 
+## v2.8.0 — Optimization pass
+
+- status: 5 jq → 2 (batched settings read; single position+pause extract)
+- build_dsp_args: 5 jq → 2 (batched settings read)
+- maybe_snapshot: idle fast path (stat-only when the socket is dead and the
+  session is fresh); session mtime kept warm via touch on no-op polls
+- is_our_mpv / dl_pid_is_ytdlp: builtin `mapfile -d ''` /proc reads, no
+  forks (~24× faster in the 50 ms kill/retry loops)
+- dl-get/dl-cancel: no setsid (fork risk breaks `$!` pid tracking);
+  cancel kills yt-dlp children (ffmpeg) before the parent
+- QML: lyrics-tab status poll 450 → 600 ms
+- Caught by the suite during this pass: jq `,` binds tighter than `|`, so
+  a batched `[a | f, b]` piped `a` into `b` — parenthesized before release
+
+---
+
 ## v2.7.0 — Downloads manager
 
 - Backend: per-video `dl-get` lock (duplicate taps can't spawn parallel

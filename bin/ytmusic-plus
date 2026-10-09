@@ -126,14 +126,23 @@ snapshot_session_live() {
 # An empty $1 means "position unknown" — keep whatever the snapshot has, so the
 # no-mpv branch never zeroes a remembered position.
 maybe_snapshot() {
-  local pos="$1" paused="${2:-true}" vals prev_pos prev_paused prev_vid prev_at now_vid dp now
+  local pos="$1" paused="${2:-true}" vals prev_pos prev_paused prev_vid now_vid dp state_m session_m
   [[ -s "$QUEUE_FILE" ]] || return 0
   [[ -s "$SESSION_FILE" ]] || { [[ -n "$pos" ]] && snapshot_session "$pos" "$paused"; return 0; }
+  # Fast path (idle): nothing playing and the session is already at least as
+  # fresh as the state file — no position to advance, nothing changed. Skips
+  # the comparison jq entirely on the common idle poll.
+  if [[ ! -S "$SOCKET" ]]; then
+    state_m="$(stat -c %Y -- "$STATE_FILE" 2>/dev/null || printf 0)"
+    session_m="$(stat -c %Y -- "$SESSION_FILE" 2>/dev/null || printf 0)"
+    [[ "$state_m" =~ ^[0-9]+$ ]] || state_m=0
+    [[ "$session_m" =~ ^[0-9]+$ ]] || session_m=0
+    (( state_m <= session_m )) && return 0
+  fi
   vals="$(jq -nr --slurpfile s "$SESSION_FILE" --slurpfile t "$STATE_FILE" \
-    '[ (($s[0] // {}).position // 0), (($s[0] // {}).paused // true), (($s[0] // {}).state.videoId // ""), (($s[0] // {}).savedAt // 0), (($t[0] // {}).videoId // "") ] | @tsv' 2>/dev/null || true)"
-  IFS=$'\t' read -r prev_pos prev_paused prev_vid prev_at now_vid <<<"$vals"
+    '[ (($s[0] // {}).position // 0), (($s[0] // {}).paused // true), (($s[0] // {}).state.videoId // ""), (($t[0] // {}).videoId // "") ] | @tsv' 2>/dev/null || true)"
+  IFS=$'\t' read -r prev_pos prev_paused prev_vid now_vid <<<"$vals"
   [[ "$prev_pos" =~ ^[0-9]+$ ]] || prev_pos=0
-  [[ "$prev_at" =~ ^[0-9]+$ ]] || prev_at=0
   [[ "$prev_paused" == true || "$prev_paused" == false ]] || prev_paused=true
   [[ "$paused" == true || "$paused" == false ]] || paused=true
   [[ -n "$pos" && "$pos" =~ ^[0-9]+$ ]] || pos="$prev_pos"
@@ -142,8 +151,9 @@ maybe_snapshot() {
     snapshot_session "$pos" "$paused"
     return 0
   fi
-  now="$(date +%s)"
-  (( now - prev_at > 3600 )) && snapshot_session "$pos" "$paused"
+  # Nothing to write: freshen the mtime so the idle fast path holds next poll.
+  # savedAt (the resume-age clock) intentionally only moves on real changes.
+  touch -- "$SESSION_FILE" 2>/dev/null || true
   return 0
 }
 
@@ -360,11 +370,24 @@ dl_progress_filter() {
 
 # Is $1 a live pid whose cmdline still mentions yt-dlp? Guards dl-cancel and
 # the dl-status reaper against pid reuse (never signal an unrelated process).
+# Builtin /proc read — no forks.
 dl_pid_is_ytdlp() {
   local pid="$1"
+  local -a cmd=()
   [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 1 )) || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'yt-dlp'
+  mapfile -d '' -t cmd <"/proc/$pid/cmdline" 2>/dev/null || return 1
+  [[ " ${cmd[*]} " == *yt-dlp* ]]
+}
+
+# Signal a download's process tree: children (the ffmpeg converter) first,
+# then yt-dlp itself, so no converter is left writing into a .part file.
+dl_kill_tree() { # signal pid
+  local sig="$1" pid="$2" child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    kill -"$sig" "$child" 2>/dev/null || true
+  done
+  kill -"$sig" "$pid" 2>/dev/null || true
 }
 
 # -- privacy base flags for every yt-dlp call: no cookies, no browser
@@ -383,9 +406,14 @@ ipc() {
 
 is_our_mpv() {
   local pid="$1"
+  local -a cmd=()
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  { tr '\0' ' ' <"/proc/$pid/cmdline" | grep -qF -- "$SOCKET"; } 2>/dev/null
+  # Builtin read of /proc cmdline (NUL-separated): no forks. This runs in the
+  # 50 ms kill_old_mpv polls and once a second in watch_track — `tr | grep`
+  # here cost ~2 process spawns per check.
+  mapfile -d '' -t cmd <"/proc/$pid/cmdline" 2>/dev/null || return 1
+  [[ " ${cmd[*]} " == *"$SOCKET"* ]]
 }
 
 kill_old_mpv() {
@@ -497,13 +525,18 @@ eq_preset_gains() {
 # survive.
 build_dsp_args() {
   DSP_ARGS=()
-  VOL="$(sget volume 2>/dev/null || printf 70)"; [[ "$VOL" =~ ^[0-9]+$ ]] || VOL=70
+  # One settings read for volume/loop/silence/normalize (launch-path latency
+  # matters: every track start goes through here).
+  local vals
+  vals="$(jq -r '[.volume // 70, .loop // "off", .silence // "off", .normalize // "off"] | @tsv' "$SETTINGS_FILE" 2>/dev/null || true)"
+  IFS=$'\t' read -r VOL loop_raw silence_raw norm_raw <<<"$vals"
+  [[ "$VOL" =~ ^[0-9]+$ ]] || VOL=70
   (( VOL >= 0 && VOL <= 100 )) || VOL=70
-  LOOP_ONE="false"; [[ "$(sget loop)" == one ]] && LOOP_ONE="true"
-  if [[ "$(sget silence)" == on ]]; then
+  LOOP_ONE="false"; [[ "$loop_raw" == one ]] && LOOP_ONE="true"
+  if [[ "$silence_raw" == on ]]; then
     DSP_ARGS+=(--af-append='silenceremove=start_periods=1:start_duration=0.3:start_threshold=-50dB:stop_periods=1:stop_duration=1.5:stop_threshold=-45dB')
   fi
-  if [[ "$(sget normalize)" == on ]]; then
+  if [[ "$norm_raw" == on ]]; then
     DSP_ARGS+=(--af-append='dynaudnorm=f=150:g=7')
   fi
   local gains g i f
@@ -1184,9 +1217,13 @@ case "${1:-}" in
     ;;
   status)
     require jq
-    loop_mode="$(sget loop)"; [[ "$loop_mode" == all || "$loop_mode" == one ]] || loop_mode=off
-    silence_on="false"; [[ "$(sget silence)" == on ]] && silence_on="true"
-    norm_on="false"; [[ "$(sget normalize)" == on ]] && norm_on="true"
+    # One settings read for all three flags: status is the hottest command in
+    # the plugin (bar + player poll it), so it must not spawn one jq per key.
+    settings_vals="$(jq -r '[.loop // "off", .silence // "off", .normalize // "off"] | @tsv' "$SETTINGS_FILE" 2>/dev/null || true)"
+    IFS=$'\t' read -r loop_mode silence_raw norm_raw <<<"$settings_vals"
+    [[ "$loop_mode" == all || "$loop_mode" == one ]] || loop_mode=off
+    silence_on="false"; [[ "$silence_raw" == on ]] && silence_on="true"
+    norm_on="false"; [[ "$norm_raw" == on ]] && norm_on="true"
     sleep_until=0; [[ -r "$SLEEP_FILE" ]] && sleep_until="$(<"$SLEEP_FILE")"
     [[ "$sleep_until" =~ ^[0-9]+$ ]] || sleep_until=0
     sleep_mode=""; [[ -r "$SLEEP_MODE_FILE" ]] && sleep_mode="$(<"$SLEEP_MODE_FILE")"
@@ -1233,8 +1270,12 @@ case "${1:-}" in
       fi
       exit 0
     fi
-    pos_now="$(jq -sr '(map(select(.request_id == 2))[0].data) // 0 | floor' <<<"$responses" 2>/dev/null || printf 0)"
-    paused_now="$(jq -sr '(map(select(.request_id == 1))[0].data) // false' <<<"$responses" 2>/dev/null || printf false)"
+    # One jq for both live values (they feed the output below AND the
+    # throttled session snapshot).
+    pos_now=""; paused_now=""
+    IFS=$'\t' read -r pos_now paused_now < <(jq -sr \
+      '[ ((map(select(.request_id == 2))[0].data) // 0 | floor), ((map(select(.request_id == 1))[0].data) // false) ] | @tsv' \
+      <<<"$responses" 2>/dev/null || true)
     [[ "$pos_now" =~ ^[0-9]+$ ]] || pos_now=0
     [[ "$paused_now" == true || "$paused_now" == false ]] || paused_now=false
     maybe_snapshot "$pos_now" "$paused_now"
@@ -1390,9 +1431,10 @@ case "${1:-}" in
       # outtmpl forces a deterministic filename (no title-derived names, no
       # --exec shell): the result lands at $tmp_out (opus) or a sibling
       # .part.* that the newest-file fallback below normalizes. Progress is
-      # parsed from stdout via the template prefix; setsid gives yt-dlp (and
-      # its ffmpeg child) their own process group so dl-cancel can kill both.
-      setsid yt-dlp "${base[@]}" --no-playlist -x --audio-format opus --audio-quality "$aq" \
+      # parsed from stdout via the template prefix. No setsid: $! must be the
+      # real yt-dlp pid (setsid can fork, making $! a short-lived parent);
+      # dl-cancel kills yt-dlp's children (ffmpeg) explicitly instead.
+      yt-dlp "${base[@]}" --no-playlist -x --audio-format opus --audio-quality "$aq" \
         --extractor-args "youtube:player_client=$client" \
         --newline --progress-template "download:YTM|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s" \
         --output "$MUSIC_DIR/.${vid}.part.%(ext)s" \
@@ -1458,23 +1500,19 @@ case "${1:-}" in
     fi
     ;;
   dl-cancel)
-    # Stop one download: SIGTERM the whole yt-dlp process group (yt-dlp +
-    # ffmpeg), wait briefly, SIGKILL leftovers, then drop the state entry and
-    # any partial files. The pid must still look like yt-dlp (pid-reuse guard).
+    # Stop one download: SIGTERM yt-dlp's children (the ffmpeg converter)
+    # first, then yt-dlp itself, wait briefly, SIGKILL leftovers, then drop
+    # the state entry and any partial files. The pid must still look like
+    # yt-dlp (pid-reuse guard) before anything is signalled.
     require jq
     vid="${2:-}"; valid_id "$vid" || exit 2
     f="$(dl_state_file "$vid")"
     [[ -s "$f" ]] || exit 0
     pid="$(jq -r '.pid // 0' "$f" 2>/dev/null || printf 0)"
     if dl_pid_is_ytdlp "$pid"; then
-      pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || printf '')"
-      if [[ "$pgid" == "$pid" ]]; then
-        kill -TERM -- "-$pid" 2>/dev/null || true
-      else
-        kill -TERM "$pid" 2>/dev/null || true
-      fi
+      dl_kill_tree TERM "$pid"
       for _ in {1..20}; do dl_pid_is_ytdlp "$pid" || break; sleep 0.1; done
-      dl_pid_is_ytdlp "$pid" && kill -KILL "$pid" 2>/dev/null || true
+      dl_pid_is_ytdlp "$pid" && dl_kill_tree KILL "$pid"
     fi
     dl_state_clear "$vid"
     rm -f -- "$MUSIC_DIR"/."${vid}".part.* 2>/dev/null || true
