@@ -20,6 +20,10 @@ BarWidget {
   Component.onCompleted: {
     try { theme = ShellColor; } catch (e1) { theme = null; }
     if (!theme) { try { theme = Color; } catch (e2) { theme = null; } }
+    // Reboot-proof session: rehydrate the queue snapshot once per shell start.
+    // Idempotent — the backend refuses to touch a non-empty live queue.
+    restoreProc.command = ["bash", scriptPath, "session-restore"]
+    restoreProc.running = true
   }
 
   property string title: ""
@@ -435,6 +439,11 @@ BarWidget {
       waitForEnd: true
       onStreamFinished: root.applyStatus(text)
     }
+  }
+
+  Process {
+    id: restoreProc
+    onExited: root.refreshStatus()
   }
 
   IpcHandler {

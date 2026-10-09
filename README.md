@@ -24,6 +24,10 @@ Privacy-first, login-free YouTube music player for the Omarchy bar.
   unplayable tracks auto-skip (capped, so a bad queue stops instead of racing)
 - **Efficient**: single `mpv` instance over IPC, `flock`-serialized state,
   10-min search cache + 3-h stream-URL cache, debounced search input
+- **Desktop-native**: mpv-mpris gives the Omarchy media panel, OSD and
+  lockscreen widgets real titles + cover art; the queue and playback
+  position survive reboots (session snapshot + mid-track resume); media
+  keys and full in-player keyboard shortcuts
 - **Themed**: every surface uses `Color.*` / `Style.*` tokens — theme switches
   repaint the player, nothing is hardcoded
 
@@ -55,7 +59,9 @@ the upstream SHA differs.
   stream URL for radio/preview items, otherwise the YouTube `watch?v=` URL).
   One line on stdout; exit 1 with `no track` when nothing is loaded.
 - `ytmusic-plus queue-clear` — stop playback and empty the queue (idempotent;
-  the counterpart to `queue JSON INDEX`).
+  the counterpart to `queue JSON INDEX`). Also drops the saved session.
+- `ytmusic-plus session-restore` — rehydrate the queue/track/position snapshot
+  saved before a reboot (idempotent; the shell calls it on startup).
 
 ## Dependencies
 
@@ -80,6 +86,9 @@ pcall(dofile, os.getenv("HOME") .. "/.config/omarchy/plugins/local.ytmusic-plus/
 ```
 
 - `Super + Ctrl + Shift + M` toggles the player.
+- Media keys: `XF86AudioNext/Previous` skip tracks and `XF86AudioStop` stops
+  (Play/Pause already reaches the player through MPRIS, so it is not
+  re-bound — a second binding would fight Omarchy's own).
 
 ## Removal
 
@@ -105,6 +114,9 @@ if you added the optional shortcut.
   "artist + title (+ duration for exact matching)" query on cache miss
   (cached 30 days). No account, no key.
 - The visualizer reads only the speaker-output monitor (never a microphone).
+- Cover art for the media panel is fetched from YouTube's thumbnail CDN
+  (`i.ytimg.com`) — the same images the UI already loads — and cached
+  locally (1 MB cap).
 - Playback availability follows YouTube/`yt-dlp`: region-locked,
   age-restricted or account-only videos may not play — the player skips them.
 
@@ -133,8 +145,10 @@ saved tracks, offline downloads, multi-source fallbacks, lyrics and a new UI.
 | What | Where |
 |---|---|
 | Runtime (socket, queue, state) | `$XDG_RUNTIME_DIR/omarchy-ytmusic-plus/` |
+| Session snapshot (queue, track, position) | `~/.local/share/omarchy-ytmusic-plus/session.json` |
 | Saved tracks, playlists, download index | `~/.local/share/omarchy-ytmusic-plus/` |
 | Search + stream caches | `~/.cache/omarchy-ytmusic-plus/` |
+| Cover-art thumbnails (MPRIS) | `~/.cache/omarchy-ytmusic-plus/art-*.jpg` |
 | Offline music (opus) | `~/Music/ytmusic-plus/` |
 
 `ytmusic-plus cache-clear` wipes the cache only.

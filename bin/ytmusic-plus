@@ -8,8 +8,8 @@
 #
 # Layout:
 #   runtime: $XDG_RUNTIME_DIR/omarchy-ytmusic-plus/{mpv.sock,state.json,queue.json,...}
-#   data:    $XDG_DATA_HOME/omarchy-ytmusic-plus/{library.json,playlists/,downloads.json}
-#   cache:   $XDG_CACHE_HOME/omarchy-ytmusic-plus/{search-,stream-}
+#   data:    $XDG_DATA_HOME/omarchy-ytmusic-plus/{library.json,playlists/,downloads.json,session.json}
+#   cache:   $XDG_CACHE_HOME/omarchy-ytmusic-plus/{search-,stream-,art-}
 #   music:   ~/Music/ytmusic-plus/*.opus
 #
 # Track TSV (stdout of search/mix/playlist/pl-show/lib-list):
@@ -32,12 +32,20 @@ OFFSETS_FILE="$DATA_DIR/lyric_offsets.json"
 SLEEP_FILE="$RUNTIME_DIR/sleep_until"
 SLEEP_MODE_FILE="$RUNTIME_DIR/sleep_mode"
 
+# Reboot-proof session snapshot: the runtime dir dies with the login session, so
+# queue + current track + position are mirrored here on every change (and from
+# throttled status polls for the position). session-restore replays it.
+SESSION_FILE="$DATA_DIR/session.json"
+
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-ytmusic-plus"
 MUSIC_DIR="$HOME/Music/ytmusic-plus"
 
 SEARCH_CACHE_TTL=600    # 10 min — search metadata goes stale fast, but not *that* fast
 STREAM_CACHE_TTL=10800  # 3 h — YouTube expiring URLs typically live ~6h; refresh at half-life
 CONNECT_TIMEOUT=8
+SESSION_MAX_BYTES=524288   # 512 KB — refuse to persist/slurp absurd sessions
+ART_CACHE_MAX_BYTES=1048576 # 1 MB cover-art thumbnails
+RESUME_MAX_AGE=2592000     # 30 days — older saved positions are not resumed
 
 mkdir -p "$RUNTIME_DIR" "$DATA_DIR" "$PL_DIR" "$CACHE_DIR" "$MUSIC_DIR"
 # Runtime holds the mpv socket + playback state: keep it private even when
@@ -63,6 +71,126 @@ fi
 # moves an empty tmp over real state.
 commit() {
   if [[ -s "${1:-}" && -n "${2:-}" ]]; then mv -- "$1" "$2"; else rm -f -- "${1:-}"; return 1; fi
+}
+
+# ---- session persistence --------------------------------------------------
+# Writes QUEUE_FILE + STATE_FILE (+ position/paused when known) to SESSION_FILE
+# atomically. Called on every queue change and, throttled, from status polls.
+snapshot_session() {
+  local pos="${1:-0}" paused="${2:-true}" qsize qlen tmp
+  [[ -s "$QUEUE_FILE" ]] || return 0
+  qlen="$(jq 'length' "$QUEUE_FILE" 2>/dev/null || printf 0)"
+  [[ "$qlen" =~ ^[1-9][0-9]*$ ]] || return 0
+  [[ "$pos" =~ ^[0-9]+$ ]] || pos=0
+  [[ "$paused" == true || "$paused" == false ]] || paused=true
+  qsize="$(stat -c%s -- "$QUEUE_FILE" 2>/dev/null || printf 0)"
+  [[ "$qsize" =~ ^[0-9]+$ ]] || qsize=0
+  (( qsize > 0 && qsize <= SESSION_MAX_BYTES )) || return 0
+  # $$-unique tmp: concurrent status polls share the lock only in read mode,
+  # so two snapshot writers must never share a temp path.
+  tmp="$SESSION_FILE.$$.tmp"
+  if jq -cn --argjson pos "$pos" --argjson paused "$paused" \
+      --slurpfile q "$QUEUE_FILE" --slurpfile s "$STATE_FILE" \
+      '{savedAt:(now|floor),position:$pos,paused:$paused,queue:($q[0] // []),state:($s[0] // {})}' >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    commit "$tmp" "$SESSION_FILE"
+  else
+    rm -f -- "$tmp"
+  fi
+}
+
+# Snapshot with the real live position when mpv is alive (stop/requeue paths).
+snapshot_session_live() {
+  local pos=0 paused=true resp p pa
+  if [[ -S "$SOCKET" ]]; then
+    resp="$(printf '%s\n' \
+      '{"command":["get_property","time-pos"],"request_id":1}' \
+      '{"command":["get_property","pause"],"request_id":2}' \
+      | socat -T 0.4 - "UNIX-CONNECT:$SOCKET" 2>/dev/null || true)"
+    if [[ -n "${resp//[[:space:]]/}" ]]; then
+      p="$(jq -sr '(map(select(.request_id == 1))[0].data) // 0 | floor' <<<"$resp" 2>/dev/null || printf 0)"
+      [[ "$p" =~ ^[0-9]+$ ]] && pos="$p"
+      pa="$(jq -sr '(map(select(.request_id == 2))[0].data) // true' <<<"$resp" 2>/dev/null || printf true)"
+      [[ "$pa" == true || "$pa" == false ]] && paused="$pa"
+    fi
+  fi
+  snapshot_session "$pos" "$paused"
+}
+
+# Throttled position save from the 1.5 s status poll: writes only when the track
+# changed, the pause state flipped, >=15 s elapsed, or the snapshot went stale.
+# An empty $1 means "position unknown" — keep whatever the snapshot has, so the
+# no-mpv branch never zeroes a remembered position.
+maybe_snapshot() {
+  local pos="$1" paused="${2:-true}" vals prev_pos prev_paused prev_vid prev_at now_vid dp now
+  [[ -s "$QUEUE_FILE" ]] || return 0
+  [[ -s "$SESSION_FILE" ]] || { [[ -n "$pos" ]] && snapshot_session "$pos" "$paused"; return 0; }
+  vals="$(jq -nr --slurpfile s "$SESSION_FILE" --slurpfile t "$STATE_FILE" \
+    '[ (($s[0] // {}).position // 0), (($s[0] // {}).paused // true), (($s[0] // {}).state.videoId // ""), (($s[0] // {}).savedAt // 0), (($t[0] // {}).videoId // "") ] | @tsv' 2>/dev/null || true)"
+  IFS=$'\t' read -r prev_pos prev_paused prev_vid prev_at now_vid <<<"$vals"
+  [[ "$prev_pos" =~ ^[0-9]+$ ]] || prev_pos=0
+  [[ "$prev_at" =~ ^[0-9]+$ ]] || prev_at=0
+  [[ "$prev_paused" == true || "$prev_paused" == false ]] || prev_paused=true
+  [[ "$paused" == true || "$paused" == false ]] || paused=true
+  [[ -n "$pos" && "$pos" =~ ^[0-9]+$ ]] || pos="$prev_pos"
+  dp=$(( pos - prev_pos )); (( dp < 0 )) && dp=$(( -dp ))
+  if [[ "$now_vid" != "$prev_vid" ]] || [[ "$paused" != "$prev_paused" ]] || (( dp >= 15 )); then
+    snapshot_session "$pos" "$paused"
+    return 0
+  fi
+  now="$(date +%s)"
+  (( now - prev_at > 3600 )) && snapshot_session "$pos" "$paused"
+  return 0
+}
+
+# ---- MPRIS / desktop integration ------------------------------------------
+# mpv-mpris (part of Omarchy's base packages) mirrors the mpv instance to the
+# desktop: media keys, the Omarchy media panel/OSD and lockscreen widgets can
+# drive playback. Two gaps closed here:
+#   1. streams carry no tags, so MPRIS would show a bare googlevideo URL as the
+#      title — --force-media-title carries our queue metadata instead;
+#   2. MPRIS art only auto-resolves for youtube.com URLs while we play resolved
+#      googlevideo URLs — the thumbnail is cached (~1 MB cap) and passed via
+#      --cover-art-files, which mpv-mpris prefers above all other art sources.
+mpris_installed() {
+  [[ -e /etc/mpv/scripts/mpris.so || -r /usr/lib/mpv-mpris/mpris.so \
+     || -e "${XDG_CONFIG_HOME:-$HOME/.config}/mpv/scripts/mpris.so" ]]
+}
+
+# Fetch (once per video) the thumbnail into the cache for use as cover art.
+# Best-effort: any failure just means no art, playback is never affected.
+art_for() {
+  local vid="$1" thumb="$2" art tmp
+  valid_id "$vid" || return 1
+  [[ "$thumb" == https://* ]] || return 1
+  art="$CACHE_DIR/art-${vid}.jpg"
+  [[ -s "$art" ]] && { printf '%s\n' "$art"; return 0; }
+  require curl 2>/dev/null || return 1
+  tmp="$art.tmp"
+  rm -f -- "$tmp"
+  if curl -fsS --max-time 8 --max-filesize "$ART_CACHE_MAX_BYTES" -o "$tmp" -- "$thumb" 2>/dev/null \
+     && [[ -s "$tmp" ]] \
+     && (( $(stat -c%s -- "$tmp" 2>/dev/null || printf 0) <= ART_CACHE_MAX_BYTES )); then
+    mv -- "$tmp" "$art" 2>/dev/null && { printf '%s\n' "$art"; return 0; }
+  fi
+  rm -f -- "$tmp"
+  return 1
+}
+
+# Fills MPRIS_ARGS: forced media title + cached cover art. Locals play from
+# tagged downloads (artist survives via tags); streams get the artist folded
+# into the forced title so the desktop never shows just a bare URL.
+build_mpris_args() {
+  local vid="$1" title="$2" artist="$3" thumb="$4" is_local="$5" disp art
+  MPRIS_ARGS=()
+  mpris_installed || return 0
+  disp="$title"
+  if [[ "$is_local" != 1 && -n "$artist" && "$artist" != "YouTube" ]]; then
+    disp="$title — $artist"
+  fi
+  [[ -n "$disp" ]] && MPRIS_ARGS+=(--force-media-title="$disp")
+  if art="$(art_for "$vid" "$thumb")"; then
+    MPRIS_ARGS+=(--cover-art-files="$art")
+  fi
 }
 
 # Settings with sane defaults. The additive merge below runs on EVERY invocation
@@ -312,21 +440,33 @@ build_dsp_args() {
 }
 
 launch_id() {
-  local vid="$1" target
+  local vid="$1" start_pos="${2:-}" target title artist thumb is_local=0
+  local -a start_args=()
   require mpv
   target="$(resolve_playable "$vid")" || return 1
+  title="$(jq -r '.title // ""' "$STATE_FILE" 2>/dev/null || printf '')"
+  artist="$(jq -r '.artist // ""' "$STATE_FILE" 2>/dev/null || printf '')"
+  thumb="$(jq -r '.thumbnail // ""' "$STATE_FILE" 2>/dev/null || printf '')"
+  [[ -f "$target" ]] && is_local=1
   build_dsp_args
+  build_mpris_args "$vid" "$title" "$artist" "$thumb" "$is_local"
+  # Resume support: only honored >5 s in (below that replaying is equivalent).
+  if [[ "$start_pos" =~ ^[0-9]+$ ]] && (( start_pos > 5 )); then
+    start_args+=(--start="$start_pos")
+  fi
   kill_old_mpv
   # --cache for network streams; harmless for local files. --no-video keeps it
   # audio-only and cheap. --ytdl=no: we already resolved, mpv must NOT run its
   # own yt-dlp pass (saves a full extraction + avoids double network).
   if [[ -f "$target" ]]; then
     mpv --no-video --force-window=no --input-ipc-server="$SOCKET" \
-      "${DSP_ARGS[@]}" --volume="$VOL" --title='YTMusic Plus' "$target" 9>&- >/dev/null 2>&1 &
+      "${DSP_ARGS[@]}" "${MPRIS_ARGS[@]}" "${start_args[@]}" \
+      --volume="$VOL" --title='YTMusic Plus' "$target" 9>&- >/dev/null 2>&1 &
   else
     mpv --no-video --force-window=no --input-ipc-server="$SOCKET" \
       --ytdl=no --cache=yes --demuxer-max-bytes=24M \
-      "${DSP_ARGS[@]}" --volume="$VOL" --title='YTMusic Plus' "$target" 9>&- >/dev/null 2>&1 &
+      "${DSP_ARGS[@]}" "${MPRIS_ARGS[@]}" "${start_args[@]}" \
+      --volume="$VOL" --title='YTMusic Plus' "$target" 9>&- >/dev/null 2>&1 &
   fi
   local mpv_pid=$!
   printf '%s\n' "$mpv_pid" >"$PID_FILE"
@@ -428,13 +568,14 @@ watch_track() {
 # Direct stream launch (radio stations, 30s previews): no YouTube resolving,
 # same DSP chain + volume as launch_id. Exported for start_index's url branch.
 launch_stream() {
-  local url="$1"
+  local url="$1" title="${2:-}" artist="${3:-}" thumb="${4:-}" vid="${5:-}"
   require mpv
   [[ "$url" == http://* || "$url" == https://* ]] || return 2
   build_dsp_args
+  build_mpris_args "$vid" "$title" "$artist" "$thumb" 0
   local -a args=(--no-video --force-window=no --input-ipc-server="$SOCKET"
     --ytdl=no --cache=yes --demuxer-max-bytes=24M --volume="$VOL" --title='YTMusic Plus')
-  args+=("${DSP_ARGS[@]}")
+  args+=("${MPRIS_ARGS[@]}" "${DSP_ARGS[@]}")
   kill_old_mpv
   mpv "${args[@]}" "$url" 9>&- >/dev/null 2>&1 &
   local mpv_pid=$!
@@ -446,13 +587,14 @@ start_index() {
   # _tries bounds the unplayable-track skip chain: without it, a fully
   # unresolvable queue (offline/throttled) recursed forever, wrapping the
   # queue indefinitely and spawning unbounded yt-dlp runs.
-  local index="$1" count track vid url state_tmp target _tries="${2:-0}" exp_u now_u
+  # $3 == "resume": toggle's cold start may replay the session position.
+  local index="$1" count track vid url title artist thumb state_tmp target _tries="${2:-0}" exp_u now_u resume_pos="" dur_r secs_r
   count="$(jq 'length' "$QUEUE_FILE" 2>/dev/null || printf 0)"
   [[ "$count" =~ ^[0-9]+$ ]] || count=0
   # Empty queue: stop stale playback instead of going silent on a dead index.
   if (( count == 0 )); then
     kill_old_mpv 2>/dev/null || true
-    rm -f -- "$FAIL_FILE" "$STATE_FILE"
+    rm -f -- "$FAIL_FILE" "$STATE_FILE" "$SESSION_FILE"
     exit 0
   fi
   index=$(( (index % count + count) % count ))
@@ -460,6 +602,26 @@ start_index() {
   [[ -n "$track" && "$track" != null ]] || exit 1
   vid="$(jq -r '.videoId // ""' <<<"$track" 2>/dev/null || printf '')"
   valid_id "$vid" || exit 2
+  title="$(jq -r '.title // ""' <<<"$track" 2>/dev/null || printf '')"
+  artist="$(jq -r '.artist // ""' <<<"$track" 2>/dev/null || printf '')"
+  thumb="$(jq -r '.thumbnail // ""' <<<"$track" 2>/dev/null || printf '')"
+  # Resume (toggle cold start only): replay the snapshot position when it still
+  # points at this exact track, is younger than RESUME_MAX_AGE, sits past the
+  # first 5 s and isn't the tail of a known-duration track. Live streams never
+  # resume (a "position" in a live edge is meaningless).
+  if [[ "${3:-}" == "resume" && -s "$SESSION_FILE" ]]; then
+    resume_pos="$(jq -r --arg v "$vid" --argjson age "$RESUME_MAX_AGE" \
+      'if (.state.videoId // "") == $v and (.state.isLive // false) != true
+          and (.savedAt // 0) > ((now|floor) - $age)
+          and ((.position // 0) | floor) >= 5
+       then ((.position // 0) | floor) else "" end' "$SESSION_FILE" 2>/dev/null || printf '')"
+    [[ "$resume_pos" =~ ^[0-9]+$ ]] || resume_pos=""
+    if [[ -n "$resume_pos" ]]; then
+      if secs_r="$(dur_to_sec "$(jq -r '.duration // ""' <<<"$track" 2>/dev/null || printf '')" 2>/dev/null)"; then
+        (( resume_pos >= secs_r - 10 )) && resume_pos=""
+      fi
+    fi
+  fi
   # Queue entries may carry a direct stream url (radio, previews): play it
   # without any YouTube resolving.
   url="$(jq -r '.url // ""' <<<"$track" 2>/dev/null || printf '')"
@@ -481,7 +643,8 @@ start_index() {
       jq -c --argjson index "$index" '. + {index: $index}' <<<"$track" >"$state_tmp" 2>/dev/null || return 1
       [[ -s "$state_tmp" ]] || return 1
       mv -- "$state_tmp" "$STATE_FILE"
-      launch_stream "$url"
+      snapshot_session 0 false
+      launch_stream "$url" "$title" "$artist" "$thumb" "$vid"
       return $?
     fi
     # Expired url cleared above: fall through to the YouTube pre-resolve for
@@ -501,9 +664,10 @@ start_index() {
   jq -c --argjson index "$index" '. + {index: $index}' <<<"$track" >"$state_tmp" 2>/dev/null || return 1
   [[ -s "$state_tmp" ]] || return 1
   mv -- "$state_tmp" "$STATE_FILE"
+  snapshot_session 0 false
   # Taste hook: best-effort play log, never blocks playback (silent, || true).
   valid_id "$vid" && "$0" taste-log "$vid" "$(jq -r '.title // ""' <<<"$track" 2>/dev/null || printf '')" "$(jq -r '.artist // ""' <<<"$track" 2>/dev/null || printf '')" >/dev/null 2>&1 || true
-  launch_id "$vid"
+  launch_id "$vid" "$resume_pos"
 }
 
 # Sleep timer watcher. A generation id guards against stale watchers: setting
@@ -707,7 +871,7 @@ update_pick_highest_stable() {
 
 # Serialize playback mutations under one exclusive lock; status takes shared.
 case "${1:-}" in
-  queue|queue-clear|requeue|play|next|previous|stop|lib-save|lib-unsave|pl-create|pl-add|pl-remove|pl-delete|pl-play|dl-get|dl-remove|set|loop|shuffle|sleep|offset-nudge|offset-reset|font-install|font-reset)
+  queue|queue-clear|requeue|play|next|previous|stop|lib-save|lib-unsave|pl-create|pl-add|pl-remove|pl-delete|pl-play|dl-get|dl-remove|set|loop|shuffle|sleep|offset-nudge|offset-reset|font-install|font-reset|session-restore)
     require flock
     exec 9>"$RUNTIME_DIR/launch.lock"
     flock 9
@@ -793,6 +957,7 @@ case "${1:-}" in
     qlen="$(jq 'length' "$QUEUE_FILE" 2>/dev/null || printf 0)"
     [[ "$qlen" =~ ^[0-9]+$ ]] || qlen=0
     if (( qlen > 0 )) && (( index >= qlen )); then index=$((qlen - 1)); fi
+    snapshot_session 0 false
     start_index "$index"
     ;;
   requeue)
@@ -819,6 +984,7 @@ case "${1:-}" in
       [[ -s "$state_tmp" ]] || { rm -f -- "$state_tmp"; exit 1; }
       mv -- "$state_tmp" "$STATE_FILE"
     fi
+    snapshot_session_live
     ;;
   play)
     require jq
@@ -839,6 +1005,7 @@ case "${1:-}" in
       '[{videoId:$vid,title:$title,artist:$artist,thumbnail:$thumbnail,duration:$duration,isLive:false}]' >"$queue_tmp"
     [[ -s "$queue_tmp" ]] || exit 1
     mv -- "$queue_tmp" "$QUEUE_FILE"
+    snapshot_session 0 false
     launch_id "$vid"
     ;;
   next)
@@ -900,7 +1067,7 @@ case "${1:-}" in
       [[ "$sidx_t" =~ ^-?[0-9]+$ ]] || sidx_t=0
       (( sidx_t < 0 )) && sidx_t=0
       (( sidx_t >= qlen_t )) && sidx_t=$((qlen_t - 1))
-      start_index "$sidx_t"
+      start_index "$sidx_t" "0" "resume"
     fi
     ;;
   pause)
@@ -926,6 +1093,7 @@ case "${1:-}" in
     ;;
   stop)
     require socat
+    snapshot_session_live
     kill_old_mpv
     ;;
   status)
@@ -938,6 +1106,9 @@ case "${1:-}" in
     sleep_mode=""; [[ -r "$SLEEP_MODE_FILE" ]] && sleep_mode="$(<"$SLEEP_MODE_FILE")"
     [[ "$sleep_mode" == timer || "$sleep_mode" == song ]] || { sleep_mode=""; sleep_until=0; }
     if [[ ! -S "$SOCKET" ]]; then
+      # Position unknown here: keep the snapshot's remembered position, only
+      # write if the track/pause actually changed (status polls continuously).
+      maybe_snapshot "" "true"
       if [[ -s "$STATE_FILE" ]]; then
         jq -c --slurpfile queue "$QUEUE_FILE" --arg loop "$loop_mode" \
           --argjson silence "$silence_on" --argjson normalize "$norm_on" \
@@ -962,6 +1133,7 @@ case "${1:-}" in
     # through to the not-running branch so callers get running:false.
     if [[ -z "${responses//[[:space:]]/}" ]]; then
       rm -f -- "$SOCKET" "$PID_FILE"
+      maybe_snapshot "" "true"
       if [[ -s "$STATE_FILE" ]]; then
         jq -c --slurpfile queue "$QUEUE_FILE" --arg loop "$loop_mode" \
           --argjson silence "$silence_on" --argjson normalize "$norm_on" \
@@ -975,6 +1147,11 @@ case "${1:-}" in
       fi
       exit 0
     fi
+    pos_now="$(jq -sr '(map(select(.request_id == 2))[0].data) // 0 | floor' <<<"$responses" 2>/dev/null || printf 0)"
+    paused_now="$(jq -sr '(map(select(.request_id == 1))[0].data) // false' <<<"$responses" 2>/dev/null || printf false)"
+    [[ "$pos_now" =~ ^[0-9]+$ ]] || pos_now=0
+    [[ "$paused_now" == true || "$paused_now" == false ]] || paused_now=false
+    maybe_snapshot "$pos_now" "$paused_now"
     if [[ -s "$STATE_FILE" ]]; then
       jq -sc --slurpfile track "$STATE_FILE" --slurpfile queue "$QUEUE_FILE" \
         --arg loop "$loop_mode" --argjson silence "$silence_on" --argjson normalize "$norm_on" \
@@ -1332,9 +1509,49 @@ case "${1:-}" in
     queue_tmp="$RUNTIME_DIR/queue.json.tmp"
     printf '[]\n' >"$queue_tmp" || exit 1
     mv -- "$queue_tmp" "$QUEUE_FILE" || exit 1
-    rm -f -- "$STATE_FILE" "$FAIL_FILE"
+    rm -f -- "$STATE_FILE" "$FAIL_FILE" "$SESSION_FILE"
     kill_old_mpv 2>/dev/null || true
     printf 'cleared\n'
+    ;;
+  session-restore)
+    # Replay a reboot-proof session snapshot into the runtime. Idempotent: a
+    # non-empty live queue (or a running mpv) always wins, so the shell can
+    # call this unconditionally on every startup. Prints `restored` when the
+    # snapshot was applied, nothing otherwise.
+    require jq
+    qlen_sr="$(jq 'length' "$QUEUE_FILE" 2>/dev/null || printf 0)"
+    [[ "$qlen_sr" =~ ^[0-9]+$ ]] || qlen_sr=0
+    (( qlen_sr > 0 )) && exit 0
+    [[ -s "$SESSION_FILE" ]] || exit 0
+    ssize_sr="$(stat -c%s -- "$SESSION_FILE" 2>/dev/null || printf 0)"
+    [[ "$ssize_sr" =~ ^[0-9]+$ ]] || ssize_sr=0
+    (( ssize_sr > 0 && ssize_sr <= SESSION_MAX_BYTES )) || exit 0
+    if [[ -S "$SOCKET" ]] && printf '%s\n' '{"command":["get_property","pause"],"request_id":1}' \
+      | socat -T 0.4 - "UNIX-CONNECT:$SOCKET" 2>/dev/null | grep -q .; then
+      exit 0
+    fi
+    qj_sr="$(jq -c 'if (.queue | type) == "array" and (.queue | length) > 0 and (.queue | length) <= 500 then .queue else empty end' "$SESSION_FILE" 2>/dev/null || printf '')"
+    [[ -n "$qj_sr" ]] || exit 0
+    queue_tmp="$RUNTIME_DIR/queue.json.tmp"
+    jq -c '.' <<<"$qj_sr" >"$queue_tmp" 2>/dev/null || { rm -f -- "$queue_tmp"; exit 0; }
+    [[ -s "$queue_tmp" ]] || { rm -f -- "$queue_tmp"; exit 0; }
+    mv -- "$queue_tmp" "$QUEUE_FILE"
+    # Restore STATE only when its track actually exists in the restored queue;
+    # a stale/mismatched track would desync index math and the Queue view.
+    stj_sr="$(jq -c 'if (.state | type) == "object" and (.state.videoId // "") != "" then .state else empty end' "$SESSION_FILE" 2>/dev/null || printf '')"
+    vid_sr=""
+    [[ -n "$stj_sr" ]] && vid_sr="$(jq -r '.videoId // ""' <<<"$stj_sr" 2>/dev/null || printf '')"
+    if [[ -n "$vid_sr" ]] && jq -e --arg v "$vid_sr" 'any(.videoId == $v)' <<<"$qj_sr" >/dev/null 2>&1; then
+      state_tmp="$RUNTIME_DIR/state.json.tmp"
+      if jq -c '.' <<<"$stj_sr" >"$state_tmp" 2>/dev/null && [[ -s "$state_tmp" ]]; then
+        mv -- "$state_tmp" "$STATE_FILE"
+      else
+        rm -f -- "$state_tmp"
+      fi
+    else
+      rm -f -- "$STATE_FILE"
+    fi
+    printf 'restored\n'
     ;;
   song-link)
     # Print the current track's share URL: the direct stream url for

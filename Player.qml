@@ -35,7 +35,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.2.3 stable"
+  readonly property string appVersion: "v2.3.0 stable"
 
   property bool opened: false
   property bool searching: false
@@ -136,6 +136,49 @@ Item {
   Keys.onPressed: function(event) {
     if (event.key === Qt.Key_Escape) {
       root.requestClose()
+      event.accepted = true
+      return
+    }
+    // Transport shortcuts. Child items (text fields, the results list) consume
+    // their own keys first — these only see what bubbled up unaccepted, so
+    // typing is never disturbed. Modifier combos pass through untouched.
+    if (event.modifiers !== Qt.NoModifier) return
+    if (event.key === Qt.Key_Space) {
+      root.togglePlayback()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+      if (root.playbackDuration > 0) {
+        var delta = event.key === Qt.Key_Left ? -5 : 5
+        var t = Math.max(0, Math.min(root.playbackDuration, root.position + delta))
+        quickProc.command = ["bash", root.scriptPath, "seek-to", t.toFixed(1)]
+        quickProc.running = true
+        root.smoothPos = t
+        root.position = t
+        root.updateLyricIndex()
+      }
+      event.accepted = true
+    } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+      root.nudgeVolume(event.key === Qt.Key_Up ? 5 : -5)
+      event.accepted = true
+    } else if (event.key === Qt.Key_Slash) {
+      root.setTab(1)
+      if (root.searchInput) root.searchInput.forceActiveFocus()
+      event.accepted = true
+    } else if (event.key === Qt.Key_F) {
+      if (root.isVideoId(root.currentVideoId)) {
+        if (root.currentSaved) {
+          root.runCmd(["lib-unsave", root.currentVideoId])
+          root.currentSaved = false
+        } else {
+          root.saveCurrent()
+        }
+      }
+      event.accepted = true
+    } else if (event.key === Qt.Key_D) {
+      root.downloadCurrent()
+      event.accepted = true
+    } else if (event.key >= Qt.Key_1 && event.key <= Qt.Key_8) {
+      root.setTab(event.key - Qt.Key_1)
       event.accepted = true
     }
   }
@@ -1241,7 +1284,16 @@ Item {
 
   function togglePlayback() {
     if (!playerRunning && tracks.count > 0) {
-      playAt(Math.max(0, selectedIndex))
+      var idx = (currentIndex >= 0 && currentIndex < tracks.count) ? currentIndex : Math.max(0, selectedIndex)
+      // The row under the cursor is the track the backend still remembers
+      // (e.g. restored after a reboot): let the CLI resume it at its saved
+      // position instead of re-queueing the list from zero.
+      if (currentVideoId !== "" && tracks.get(idx) && tracks.get(idx).videoId === currentVideoId) {
+        runAction("toggle")
+        playing = true
+        return
+      }
+      playAt(idx)
       return
     }
     runAction("toggle")

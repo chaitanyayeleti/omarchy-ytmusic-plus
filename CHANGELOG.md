@@ -1,13 +1,35 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **23** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable)
+Updates so far: **24** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.2.3 stable (current)
+## v2.3.0 stable (current)
+
+> Desktop-native release: your queue survives reboots, the desktop sees
+> what's playing (cover art included), and the player answers to the
+> keyboard.
+
+- Reboot-proof session: queue + current track + position are snapshotted
+  to `~/.local/share` (atomic, throttled); `session-restore` rehydrates on
+  shell start (idempotent), and cold-start play resumes mid-track via
+  `--start` instead of restarting from zero
+- MPRIS integration through mpv-mpris: real title/artist on the Omarchy
+  media panel, OSD and lockscreen widgets; cover art is pushed with
+  `--cover-art-files` (thumbnail cached, 1 MB cap) because resolved
+  googlevideo URLs carry none
+- Media keys: XF86AudioNext/Previous/Stop bound in `hypr-bindings.lua`
+  (Play/Pause already reaches mpv via MPRIS — deliberately not re-bound,
+  a second toggle would fight Omarchy's own binding)
+- Player keyboard shortcuts: Space play/pause · ←/→ seek ±5 s · ↑/↓ volume ·
+  `/` search · `f` save · `d` download · `1–8` switch tabs
+- `queue-clear` drops the session snapshot too; session files are never
+  auto-reset and are size-capped (512 KB)
+
+## v2.2.3 stable
 
 > No dead pixels: the bar pill hugs its content and the footer credit
 > moves out of the way.
