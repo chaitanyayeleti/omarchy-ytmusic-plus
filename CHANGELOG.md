@@ -1,13 +1,26 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **27** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable)
+Updates so far: **28** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable → v2.6.0 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.5.1 stable (current)
+## v2.6.0 stable (current)
+
+> Tidy release: regression tests live in the repo, settings gets section
+> rules, and the now-playing cover grows into a proper hero.
+
+- `test/run.sh`: offline regression suite — throwaway HOME/XDG sandbox,
+  generated local opus, null audio; 25 checks covering queue → session
+  snapshot → reboot restore → mid-track resume → next → queue-clear;
+  MPRIS asserted by pid (never touches a real player); skips cleanly
+  where mpv-mpris or a session bus is absent
+- Settings tab: hairline dividers between sections
+- Now playing: 64 px artwork with a soft accent halo while on air
+
+## v2.5.1 stable
 
 > Rebrand release: the plugin now lives at
 > `chaitanyayeleti/omarchy-ytmusic-plus`.

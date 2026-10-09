@@ -36,7 +36,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.5.1 stable"
+  readonly property string appVersion: "v2.6.0 stable"
 
   property bool opened: false
   property bool searching: false
@@ -2330,25 +2330,50 @@ Item {
           }
         }
 
-        // Now playing
+        // Now playing — artwork-first: 64px cover with an accent halo while
+        // the track is playing, title/artist, then the action cluster.
         Item {
           width: parent.width
-          height: root.currentTitle !== "" ? Style.space(56) : 0
+          height: root.currentTitle !== "" ? Style.space(64) : 0
           visible: root.currentTitle !== ""
           Row {
             anchors.fill: parent
             spacing: Style.space(8)
-            Rectangle {
-              width: Style.space(46)
+            Item {
+              width: Style.space(64)
               height: width
-              radius: Style.space(7)
-              color: root.raised
-              clip: true
               anchors.verticalCenter: parent.verticalCenter
-              Image { anchors.fill: parent; source: root.currentThumbnail; fillMode: Image.PreserveAspectCrop; asynchronous: true; opacity: status === Image.Ready ? 1 : 0; Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } } }
+              Rectangle {
+                id: npArt
+                anchors.fill: parent
+                radius: Style.space(8)
+                color: root.raised
+                clip: true
+                Image {
+                  id: npArtImage
+                  anchors.fill: parent
+                  source: root.currentThumbnail
+                  fillMode: Image.PreserveAspectCrop
+                  asynchronous: true
+                  opacity: status === Image.Ready ? 1 : 0
+                  Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                }
+              }
+              // Soft accent halo while on air; cached offscreen so the cost is
+              // one pass per track, same pattern as the seek knob.
+              Glow {
+                anchors.fill: npArt
+                source: npArt
+                color: root.accent
+                radius: 8
+                samples: 17
+                spread: 0.28
+                transparentBorder: true
+                visible: root.playing && npArtImage.status === Image.Ready
+              }
             }
             Column {
-              width: parent.width - Style.space(46) - Style.space(132) - parent.spacing * 3
+              width: parent.width - Style.space(64) - Style.space(132) - parent.spacing * 3
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(1)
               Marquee {
@@ -3826,7 +3851,7 @@ Item {
               width: parent.width
               spacing: Style.space(1)
 
-              Text { text: "Playback"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(2) }
+              SectionHeader { title: "Playback"; first: true }
 
               SettingRow {
                 title: "Skip silence"
@@ -3869,7 +3894,7 @@ Item {
                 }
               }
 
-              Text { text: "Lyrics"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Lyrics" }
 
               SettingRow {
                 title: "Default sync offset"
@@ -3894,7 +3919,7 @@ Item {
                 }
               }
 
-              Text { text: "Queue & library"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Queue & library" }
 
               SettingRow {
                 title: "Autoplay mix"
@@ -3924,7 +3949,7 @@ Item {
                 }
               }
 
-              Text { text: "Equalizer"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Equalizer" }
 
               Text {
                 width: parent.width
@@ -3996,7 +4021,7 @@ Item {
                 }
               }
 
-              Text { text: "Appearance"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Appearance" }
 
               SettingRow {
                 title: "Custom font"
@@ -4018,7 +4043,7 @@ Item {
                 }
               }
 
-              Text { text: "Sleep timer"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Sleep timer" }
 
               Item {
                 width: parent.width
@@ -4078,7 +4103,7 @@ Item {
                 }
               }
 
-              Text { text: "Storage"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Storage" }
 
               SettingRow {
                 title: "Clear caches"
@@ -4093,7 +4118,7 @@ Item {
                 }
               }
 
-              Text { text: "Updates"; color: root.ink; font.family: root.uiFont; font.pixelSize: Style.font.bodySmall; font.bold: true; topPadding: Style.space(8) }
+              SectionHeader { title: "Updates" }
 
               Text {
                 width: parent.width
@@ -4483,6 +4508,31 @@ Item {
       var h = groove.height
       var v = (0.5 - Math.max(0, Math.min(1, y / h))) * 24
       if (changed) changed(Math.round(v * 2) / 2)
+    }
+  }
+
+  // Settings section: hairline divider + bold label. `first` skips the
+  // divider on the top section so the scroll area doesn't open with a line.
+  component SectionHeader: Column {
+    id: sectionHeader
+    property string title
+    property bool first: false
+    width: parent.width
+    spacing: Style.space(6)
+    Rectangle {
+      width: parent.width
+      height: 1
+      color: root.border
+      opacity: 0.35
+      visible: !sectionHeader.first
+    }
+    Text {
+      text: sectionHeader.title
+      color: root.ink
+      font.family: root.uiFont
+      font.pixelSize: Style.font.bodySmall
+      font.bold: true
+      topPadding: sectionHeader.first ? Style.space(2) : Style.space(6)
     }
   }
 

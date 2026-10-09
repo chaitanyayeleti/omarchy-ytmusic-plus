@@ -155,6 +155,19 @@ saved tracks, offline downloads, multi-source fallbacks, lyrics and a new UI.
 
 `ytmusic-plus cache-clear` wipes the cache only.
 
+## Testing
+
+```sh
+bash test/run.sh
+```
+
+Offline regression suite: the backend runs in a throwaway HOME/XDG sandbox
+with a generated local opus file and null audio — no network, no sound, and
+your real library, queue and settings are never touched. 25 checks cover
+queue → session snapshot → reboot restore → mid-track resume → next →
+queue-clear, plus static syntax checks. The MPRIS check matches the sandbox
+mpv by pid and skips cleanly where mpv-mpris or a session bus is absent.
+
 ## License
 
 MIT

@@ -7,6 +7,15 @@ the local work, newest first.
 
 ---
 
+## v2.6.0 — Tidy release
+
+- `test/run.sh`: in-repo offline regression suite (fake HOME/XDG sandbox,
+  generated opus, null audio, 25 checks; MPRIS asserted by sandbox pid).
+- Settings tab: hairline dividers between sections (SectionHeader).
+- Now playing: 64 px artwork with an accent halo while playing.
+
+---
+
 ## v2.5.0 — Interaction polish
 
 - **Seek bar scrub preview**: a time bubble follows the pointer while
@@ -73,14 +82,14 @@ the local work, newest first.
 
 ## Verification performed
 
-- Sandbox (fake HOME/XDG + local opus, no network): queue → play →
-  MPRIS title/artist/artUrl → seek → throttled snapshot → stop (live
-  snapshot) → runtime wipe → restore → resume at `--start=25` → dead
-  polls preserve position → `next` advances session → `queue-clear`
-  drops session. `bash -n`, `qmllint`, `luac` clean.
-- Real environment: real track played, MPRIS exposed
-  `xesam:title` + `mpris:artUrl`; popup open/close after each UI slice
-  with zero QML errors in the shell log.
+- Codified in `test/run.sh` (v2.6.0): offline sandbox covering queue →
+  play → seek → throttled snapshot → stop (live snapshot) → runtime wipe →
+  restore → resume at the saved position → dead polls preserve position →
+  `next` advances the session → `queue-clear` drops it; plus static
+  syntax checks. 25/25 passing.
+- Ad-hoc during development: MPRIS `xesam:title` + `mpris:artUrl` on real
+  and sandboxed playback; real-environment popup open/close after each UI
+  slice with zero QML errors in the shell log.
 
 ## Local integration (outside this repository)
 
@@ -94,6 +103,7 @@ the local work, newest first.
   anti-hijack check verifies this origin (https or ssh); anything else is
   refused with exit 2. Install with
   `omarchy plugin add https://github.com/chaitanyayeleti/omarchy-ytmusic-plus.git --enable`.
-- Commits: `0f24ff6` (v2.3.0), `02ac1d8` (v2.4.0), `5a920a5` (v2.5.0).
+- Commits: `0f24ff6` (v2.3.0), `02ac1d8` (v2.4.0), `5a920a5` (v2.5.0),
+  `b30c2c7` (v2.5.1 rebrand), v2.6.0 tidy release.
 - The original upstream is kept as a local `upstream` remote for merging
   future fixes; it is not referenced by any shipped code.
