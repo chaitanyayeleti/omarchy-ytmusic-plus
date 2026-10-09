@@ -46,7 +46,7 @@ the upstream SHA differs.
   `ytmusic-plus update-apply`: `omarchy plugin update local.ytmusic-plus`,
   then `omarchy-shell shell rescanPlugins` so the new UI hot-loads.
 - The `origin` remote must be
-  `github.com/Pro-Termux-arch/omarchy-ytmusic-plus` (https or ssh); anything
+  `github.com/chaitanyayeleti/omarchy-ytmusic-plus` (https or ssh); anything
   else is refused (anti-hijack, exit 2).
 - **Auto-apply updates** (default on) applies a background find automatically.
   A background check runs on open when the last check is older than 24 h
@@ -72,7 +72,7 @@ the upstream SHA differs.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/Pro-Termux-arch/omarchy-ytmusic-plus.git --enable
+omarchy plugin add https://github.com/chaitanyayeleti/omarchy-ytmusic-plus.git --enable
 ```
 
 Open it from the bar icon or directly:

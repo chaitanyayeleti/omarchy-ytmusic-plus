@@ -36,7 +36,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.5.0 stable"
+  readonly property string appVersion: "v2.5.1 stable"
 
   property bool opened: false
   property bool searching: false
@@ -4173,11 +4173,10 @@ Item {
           }
         }
 
-        // Bottom bar: version bottom-left, credit bottom-center (kept short so
-        // the two can never overlap — the v1.2 footer-collision report).
-        // Update cluster lives here (compact): version + check icon + short
-        // status; Update replaces status when available so the left cluster
-        // never reaches the centered credit. Height stays 18.
+        // Bottom bar: version bottom-left, update cluster right. The Update
+        // cluster (compact: version + check icon + short status; Update
+        // replaces status when available) stays clear of the left cluster.
+        // Height stays 18.
         Item {
           width: parent.width
           height: Style.space(18)
@@ -4221,15 +4220,6 @@ Item {
               hPad: 12
               tapped: function() { root.applyUpdate(true) }
             }
-          }
-          Text {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            text: "♥ itsdotdev · fork"
-            color: root.muted
-            opacity: 0.7
-            font.family: root.uiFont
-            font.pixelSize: Style.font.caption
           }
         }
       }

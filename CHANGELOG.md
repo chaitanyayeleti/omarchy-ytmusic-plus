@@ -1,13 +1,23 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **26** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable)
+Updates so far: **27** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.5.0 stable (current)
+## v2.5.1 stable (current)
+
+> Rebrand release: the plugin now lives at
+> `chaitanyayeleti/omarchy-ytmusic-plus`.
+
+- Updater anti-hijack check and docs point at the new origin
+- `manifest.json` author + README install URL updated
+- Fork credit removed from the player footer (attribution stays in
+  README Credits and the MIT LICENSE)
+
+## v2.5.0 stable
 
 > Interaction polish: seeking shows where you're going, feedback sits in
 > a pill, empty tabs wear their own icon, and the search box got its

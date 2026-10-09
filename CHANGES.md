@@ -90,7 +90,10 @@ the local work, newest first.
   `pcall(dofile, os.getenv("HOME") .. "/.config/omarchy/plugins/local.ytmusic-plus/hypr-bindings.lua")`
   (backup: `bindings.lua.bak.1791575492`); `hyprctl reload` +
   `configerrors` clean.
+- Repo: `github.com/chaitanyayeleti/omarchy-ytmusic-plus` — the built-in
+  anti-hijack check verifies this origin (https or ssh); anything else is
+  refused with exit 2. Install with
+  `omarchy plugin add https://github.com/chaitanyayeleti/omarchy-ytmusic-plus.git --enable`.
 - Commits: `0f24ff6` (v2.3.0), `02ac1d8` (v2.4.0), `5a920a5` (v2.5.0).
-- `origin` still points at `Pro-Termux-arch/omarchy-ytmusic-plus`: the
-  plugin's "Update now" merges upstream into this checkout; pushing to a
-  different remote makes the built-in anti-hijack check refuse updates.
+- The original upstream is kept as a local `upstream` remote for merging
+  future fixes; it is not referenced by any shipped code.

@@ -827,7 +827,7 @@ ytdlp_playlist() {
 # the manifest version plus short git SHAs, and availability compares FULL
 # SHAs. update-check is read-only (never writes state/queue/settings/mpv);
 # update-apply delegates to the plugin manager and never deletes anything.
-UPDATE_UPSTREAM="github.com/Pro-Termux-arch/omarchy-ytmusic-plus"
+UPDATE_UPSTREAM="github.com/chaitanyayeleti/omarchy-ytmusic-plus"
 UPDATE_TIMEOUT_SHORT=20
 UPDATE_TIMEOUT_LONG=180
 
@@ -847,9 +847,9 @@ update_origin_url() {
   command -v git >/dev/null 2>&1 || return 2
   url="$(git -C "$dir" remote get-url origin 2>/dev/null)" || return 2
   [[ -n "$url" ]] || return 2
-  if [[ "$url" =~ ^https://github\.com/Pro-Termux-arch/omarchy-ytmusic-plus(\.git)?/?$ ]]; then printf '%s\n' "$url"; return 0; fi
-  if [[ "$url" =~ ^git@github\.com:Pro-Termux-arch/omarchy-ytmusic-plus(\.git)?/?$ ]]; then printf '%s\n' "$url"; return 0; fi
-  if [[ "$url" =~ ^ssh://git@github\.com/Pro-Termux-arch/omarchy-ytmusic-plus(\.git)?/?$ ]]; then printf '%s\n' "$url"; return 0; fi
+  if [[ "$url" =~ ^https://github\.com/chaitanyayeleti/omarchy-ytmusic-plus(\.git)?/?$ ]]; then printf '%s\n' "$url"; return 0; fi
+  if [[ "$url" =~ ^git@github\.com:chaitanyayeleti/omarchy-ytmusic-plus(\.git)?/?$ ]]; then printf '%s\n' "$url"; return 0; fi
+  if [[ "$url" =~ ^ssh://git@github\.com/chaitanyayeleti/omarchy-ytmusic-plus(\.git)?/?$ ]]; then printf '%s\n' "$url"; return 0; fi
   return 1
 }
 
