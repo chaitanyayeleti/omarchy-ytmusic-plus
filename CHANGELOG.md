@@ -1,13 +1,26 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **24** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable)
+Updates so far: **25** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.3.0 stable (current)
+## v2.4.0 stable (current)
+
+> Modern face: the dock becomes a strip of icons with hover labels, and
+> the current artwork washes the whole player in a soft blur.
+
+- Dock: uniform icon cells (compass/find/queue/playlist/heart/download/
+  note/gear — all verified against the Nerd Font) with the tab name on
+  hover; the sliding highlight keeps a constant width, icons pop on hover
+- Ambient backdrop: current cover blurred (MultiEffect, GPU) and dimmed
+  behind every surface, fading in/out per track; the surface wash keeps
+  text contrast over bright art
+- Animations honor `Style.duration` (respects reduce-motion)
+
+## v2.3.0 stable
 
 > Desktop-native release: your queue survives reboots, the desktop sees
 > what's playing (cover art included), and the player answers to the

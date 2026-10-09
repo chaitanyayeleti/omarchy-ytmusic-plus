@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Qt5Compat.GraphicalEffects
 import QtQuick.Dialogs
+import QtQuick.Effects
 import qs.Commons
 import qs.Ui
 
@@ -35,7 +36,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.3.0 stable"
+  readonly property string appVersion: "v2.4.0 stable"
 
   property bool opened: false
   property bool searching: false
@@ -2033,12 +2034,35 @@ Item {
     scale: root.opened ? 1 : 0.985
     Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
+    // Ambient backdrop: the current artwork, blurred and dimmed, sits behind
+    // every surface (replaces the old flat 5% image). GPU-only via
+    // MultiEffect, disabled without art, and the card's rounded clip plus the
+    // border inset keep it inside the frame. The surface wash above it keeps
+    // text contrast honest over bright covers.
     Image {
+      id: ambientImage
       anchors.fill: parent
+      anchors.margins: card.border.width
       source: root.currentThumbnail
       fillMode: Image.PreserveAspectCrop
       asynchronous: true
-      opacity: root.currentThumbnail ? 0.05 : 0
+      opacity: root.currentThumbnail !== "" ? 1 : 0
+      layer.enabled: root.currentThumbnail !== ""
+      layer.effect: MultiEffect {
+        blurEnabled: true
+        blur: 0.85
+        blurMax: 64
+        saturation: 0.85
+        brightness: -0.12
+      }
+      Behavior on opacity { NumberAnimation { duration: Style.duration(350); easing.type: Easing.OutCubic } }
+    }
+    Rectangle {
+      anchors.fill: parent
+      anchors.margins: card.border.width
+      color: root.surface
+      opacity: root.currentThumbnail !== "" ? 0.66 : 1
+      Behavior on opacity { NumberAnimation { duration: Style.duration(350); easing.type: Easing.OutCubic } }
     }
 
     Item {
@@ -2115,27 +2139,33 @@ Item {
               Repeater {
                 id: dockCellsRepeater
                 model: [
-                  { label: "Home", tip: "Discover: charts, radio, tunes" },
-                  { label: "Find", tip: "Search YouTube — no login" },
-                  { label: "Queue", tip: "Up next" },
-                  { label: "Playlist", tip: "Imports + your lists" },
-                  { label: "Favourite", tip: "Loved tracks" },
-                  { label: "Local", tip: "Offline downloads" },
-                  { label: "Lyrics", tip: "Synced lyrics" },
-                  { label: "", icon: true, tip: "Settings" }
+                  { glyph: "󰆋", label: "Home", tip: "Discover: charts, radio, tunes" },
+                  { glyph: "󰍉", label: "Find", tip: "Search YouTube — no login" },
+                  { glyph: "󰐑", label: "Queue", tip: "Up next" },
+                  { glyph: "󰲸", label: "Playlist", tip: "Imports + your lists" },
+                  { glyph: "󰣐", label: "Favourite", tip: "Loved tracks" },
+                  { glyph: "󰇚", label: "Local", tip: "Offline downloads" },
+                  { glyph: "󰎇", label: "Lyrics", tip: "Synced lyrics" },
+                  { glyph: "󰒓", label: "Settings", tip: "Settings" }
                 ]
                 Item {
-                  width: cellLabel.width + Style.space(14)
+                  // Uniform icon cells: the sliding highlight keeps a constant
+                  // width, so the dock reads as one clean strip of glyphs.
+                  // Names live in the hover tooltip.
+                  width: Style.space(30)
                   height: dockCellsRow.height
                   Text {
                     id: cellLabel
                     anchors.centerIn: parent
-                    text: modelData.label
-                    color: dockRow.litTab === index ? root.onAccent : root.muted
-                    font.family: modelData.icon ? root.iconFont : root.uiFont
-                    font.pixelSize: Math.max(8, Style.font.caption - 1)
+                    text: modelData.glyph
+                    color: dockRow.litTab === index ? root.onAccent : (dockHover.containsMouse ? root.ink : root.muted)
+                    font.family: root.iconFont
+                    font.pixelSize: Style.font.icon
                     font.bold: root.tabIndex === index
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    transformOrigin: Item.Center
+                    scale: dockHover.containsMouse ? 1.15 : 1.0
+                    Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+                    Behavior on scale { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutBack } }
                   }
                   MouseArea {
                     id: dockHover
@@ -2149,7 +2179,7 @@ Item {
                     onExited: if (root.hoveredTab === index) root.hoveredTab = -1
                     onClicked: root.setTab(index)
                   }
-                  InfoTip { watched: dockHover; tipText: modelData.tip }
+                  InfoTip { watched: dockHover; tipText: modelData.label }
                 }
               }
             }
