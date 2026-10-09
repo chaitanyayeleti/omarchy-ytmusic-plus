@@ -8,7 +8,9 @@ Privacy-first, login-free YouTube music player for the Omarchy bar.
   (create, add, open, play) stored as JSON under `~/.local/share`
 - **Saved tracks** (♥ library) with one-key save/unsave
 - **Downloads**: offline Opus cache in `~/Music/ytmusic-plus/`; downloaded
-  tracks play locally with zero network, and the resolver prefers them
+  tracks play locally with zero network, and the resolver prefers them. The
+  Local tab shows live transfers with progress, cancel and retry — and
+  downloads never block playback.
 - **Lyrics**: version-matched synced lyrics via lrclib (no key, no login) —
   the exact cut is picked by duration, the active line glows in your theme
   accent and follows the song on a phase-locked clock; per-song ± sync
@@ -163,10 +165,12 @@ bash test/run.sh
 
 Offline regression suite: the backend runs in a throwaway HOME/XDG sandbox
 with a generated local opus file and null audio — no network, no sound, and
-your real library, queue and settings are never touched. 25 checks cover
+your real library, queue and settings are never touched. 33 checks cover
 queue → session snapshot → reboot restore → mid-track resume → next →
-queue-clear, plus static syntax checks. The MPRIS check matches the sandbox
-mpv by pid and skips cleanly where mpv-mpris or a session bus is absent.
+queue-clear, the downloads-manager mechanics (duplicate guard, stale reap,
+cancel/dismiss), and static syntax checks. The MPRIS check matches the
+sandbox mpv by pid and skips cleanly where mpv-mpris or a session bus is
+absent.
 
 ## License
 

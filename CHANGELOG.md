@@ -1,13 +1,31 @@
 # YTMusic Plus — Changelog
 
-Updates so far: **28** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable → v2.6.0 stable)
+Updates so far: **29** (v1.0 stable → v1.1 beta → v1.2 beta → v1.4 stable → v1.5 beta → v1.6 stable → v1.7 stable → v1.8 beta → v1.9 beta → v2 stable → v2.1 stable → v2.1.1 stable → v2.1.2 stable → v2.1.3 stable → v2.1.4 stable → v2.1.5 stable → v2.1.6 stable → v2.1.7 stable → v2.1.8 stable → v2.1.9 stable → v2.2 stable → v2.2.1 stable → v2.2.2 stable → v2.2.3 stable → v2.3.0 stable → v2.4.0 stable → v2.5.0 stable → v2.5.1 stable → v2.6.0 stable → v2.7.0 stable)
 
 When cutting a release, bump all three together:
 `manifest.json` → `Player.qml` (`appVersion`) → this file.
 Stable releases also get a tag: `vX.Y.Z-stable` (the stable update channel
 tracks these tags; tag the release commit right after pushing).
 
-## v2.6.0 stable (current)
+## v2.7.0 stable (current)
+
+> Downloads grow up: live progress, cancel and retry in the Local tab —
+> and transfers no longer block playback.
+
+- Local tab downloads manager: active transfers with progress bar, %,
+  speed/eta (polled from the new lock-free `dl-status`); failed ones get
+  retry (↻) and dismiss (×)
+- `dl-cancel`: SIGTERMs the whole yt-dlp process group (yt-dlp + ffmpeg),
+  waits, SIGKILLs leftovers, clears partials; pid-reuse guarded
+- `dl-get`: per-video lock ends duplicate-tap races; no longer holds the
+  global playback lock, so queue/next/stop stay responsive mid-download
+- Track rows: the download button becomes a live NN% (click cancels) while
+  that track is downloading
+- Stale "downloading" entries (crash, kill, logout race) are reaped to
+  failed/interrupted instead of spinning forever
+- Test suite: 33 checks (downloads-manager mechanics included)
+
+## v2.6.0 stable
 
 > Tidy release: regression tests live in the repo, settings gets section
 > rules, and the now-playing cover grows into a proper hero.

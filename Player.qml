@@ -36,7 +36,7 @@ Item {
   }
   readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#101010" : "#ffffff"
   // Release stamp, bottom-left. Bump together with manifest.json + CHANGELOG.md.
-  readonly property string appVersion: "v2.6.0 stable"
+  readonly property string appVersion: "v2.7.0 stable"
 
   property bool opened: false
   property bool searching: false
@@ -118,6 +118,10 @@ Item {
   property bool currentDownloaded: false
   property bool mixPrefetching: false
   property bool currentIsLive: false
+  // Downloads manager: live/failed transfers polled from `dl-status`, plus a
+  // recent-request stamp so polling starts even before the state file lands.
+  property var dlActive: []
+  property double dlLastRequestMs: 0
   property bool playing: false
   property bool playerRunning: false
   property real position: 0
@@ -917,6 +921,7 @@ Item {
       return
     }
     runCmd(["dl-get"].concat(trackArgs(i)))
+    dlLastRequestMs = Date.now()
     notice = "Downloading… (opus, ~/Music)"
     noticeTimer.restart()
   }
@@ -929,8 +934,58 @@ Item {
       return
     }
     runCmd(["dl-get", currentVideoId, currentTitle, currentArtist, currentThumbnail, currentDuration, currentIsLive ? "true" : "false"])
+    dlLastRequestMs = Date.now()
     notice = "Downloading… (opus, ~/Music)"
     noticeTimer.restart()
+  }
+
+  function dlEntryFor(videoId) {
+    for (var i = 0; i < root.dlActive.length; i++) {
+      if (root.dlActive[i] && root.dlActive[i].videoId === videoId) return root.dlActive[i]
+    }
+    return null
+  }
+
+  // -1 = not downloading; 0-100 while that video's transfer is running.
+  function dlPercent(videoId) {
+    var e = root.dlEntryFor(videoId)
+    return (e && e.state === "downloading") ? Math.max(0, Math.min(100, Number(e.progress) || 0)) : -1
+  }
+
+  function refreshDownloads() {
+    if (dlStatusProc.running) return
+    dlStatusProc.command = ["bash", scriptPath, "dl-status"]
+    dlStatusProc.running = true
+  }
+
+  function dlCancel(videoId) {
+    if (!root.isVideoId(videoId)) return
+    runCmd(["dl-cancel", videoId])
+  }
+
+  function dlRetry(entry) {
+    if (!entry || !root.isVideoId(entry.videoId)) return
+    runCmd(["dl-get", entry.videoId, entry.title || "Untitled", entry.artist || "YouTube",
+            entry.thumbnail || "", entry.duration || "", entry.isLive === true ? "true" : "false"])
+    dlLastRequestMs = Date.now()
+    notice = "Downloading… (opus, ~/Music)"
+    noticeTimer.restart()
+    refreshDownloads()
+  }
+
+  function applyDlStatus(raw) {
+    var previous = root.dlActive.length
+    try {
+      var arr = JSON.parse(String(raw || "[]"))
+      root.dlActive = Array.isArray(arr) ? arr : []
+    } catch (e) {
+      root.dlActive = []
+    }
+    // A transfer that vanished finished (or was cancelled): refresh the
+    // downloaded list so completed tracks appear without a manual reload.
+    if (root.dlActive.length < previous && root.tabIndex === 5 && listMode === "downloads") {
+      Qt.callLater(root.loadDownloads)
+    }
   }
 
   function addTrackToPlaylist(i) {
@@ -1980,7 +2035,24 @@ Item {
     running: root.opened
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.refreshStatus()
+    onTriggered: {
+      root.refreshStatus()
+      // Poll the downloads manager while the Local tab is open, while a
+      // transfer is live, or right after a request (state file may still be
+      // landing). Cheap: a dir of small JSONs, lock-free.
+      if (root.opened && (root.tabIndex === 5 || root.dlActive.length > 0
+          || (Date.now() - root.dlLastRequestMs) < 10000)) {
+        root.refreshDownloads()
+      }
+    }
+  }
+
+  Process {
+    id: dlStatusProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyDlStatus(text)
+    }
   }
 
   // Phase-locked lyric clock: interpolates mpv's position between IPC polls
@@ -3676,6 +3748,103 @@ Item {
           }
         }
 
+        // Downloads manager (Local tab): live transfers with progress bars,
+        // cancel, and retry for failed ones. Sits above the downloaded list
+        // and shrinks it while entries exist.
+        Item {
+          width: parent.width
+          height: visible ? (root.dlActive.length * Style.space(42)) : 0
+          visible: root.tabIndex === 5 && root.dlActive.length > 0
+          Column {
+            width: parent.width
+            spacing: Style.space(4)
+            Repeater {
+              model: root.dlActive
+              delegate: Rectangle {
+                required property var modelData
+                width: parent.width
+                height: Style.space(38)
+                radius: Style.space(7)
+                color: root.raised
+                Column {
+                  anchors.fill: parent
+                  anchors.margins: Style.space(6)
+                  spacing: Style.space(3)
+                  Row {
+                    width: parent.width
+                    spacing: Style.space(6)
+                    Text {
+                      width: parent.width - Style.space(80)
+                      text: modelData.title || "Untitled"
+                      textFormat: Text.PlainText
+                      color: root.ink
+                      font.family: root.uiFont
+                      font.pixelSize: Style.font.bodySmall
+                      font.bold: true
+                      elide: Text.ElideRight
+                    }
+                    Text {
+                      width: Style.space(30)
+                      horizontalAlignment: Text.AlignRight
+                      text: modelData.state === "downloading"
+                        ? (Math.floor(Number(modelData.progress) || 0) + "%")
+                        : "failed"
+                      textFormat: Text.PlainText
+                      color: modelData.state === "downloading" ? root.accent : "#ff7a7a"
+                      font.family: root.uiFont
+                      font.pixelSize: Style.font.caption
+                    }
+                    Text {
+                      visible: modelData.state !== "downloading"
+                      text: "↻"
+                      color: dlRetryHover.containsMouse ? root.ink : root.muted
+                      font.family: root.uiFont
+                      font.pixelSize: Style.font.caption
+                      MouseArea {
+                        id: dlRetryHover
+                        anchors.fill: parent
+                        anchors.margins: -Style.space(3)
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.dlRetry(modelData)
+                      }
+                      InfoTip { watched: dlRetryHover; tipText: "Retry download" }
+                    }
+                    Text {
+                      text: "󰅖"
+                      color: dlCancelHover.containsMouse ? root.ink : root.muted
+                      font.family: root.iconFont
+                      font.pixelSize: Style.font.caption
+                      MouseArea {
+                        id: dlCancelHover
+                        anchors.fill: parent
+                        anchors.margins: -Style.space(3)
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.dlCancel(modelData.videoId)
+                      }
+                      InfoTip { watched: dlCancelHover; tipText: modelData.state === "downloading" ? "Cancel download" : "Dismiss" }
+                    }
+                  }
+                  Rectangle {
+                    width: parent.width
+                    height: Style.space(4)
+                    radius: height / 2
+                    color: root.surface
+                    Rectangle {
+                      width: parent.width * (Math.max(0, Math.min(100, Number(modelData.progress) || 0)) / 100)
+                      height: parent.height
+                      radius: height / 2
+                      color: modelData.state === "downloading" ? root.accent : "#ff7a7a"
+                      Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
         // Track list
         ListView {
           id: resultList
@@ -4158,6 +4327,7 @@ Item {
           width: parent.width
           height: visible ? parent.height - y - Style.space(18) : 0
           visible: tracks.count === 0 && !root.searching && root.tabIndex !== 0 && root.tabIndex !== 6 && root.tabIndex !== 7
+                   && !(root.tabIndex === 5 && root.dlActive.length > 0)
           opacity: visible ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: Style.duration(150); easing.type: Easing.OutCubic } }
           Column {
@@ -4778,11 +4948,22 @@ Item {
             MouseArea { id: listArea; anchors.fill: parent; anchors.margins: -Style.space(4); hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.addTrackToPlaylist(trackRow.index) }
           }
           Text {
-            text: "󰇚"; color: dlArea.containsMouse ? root.ink : root.muted; font.family: root.iconFont; font.pixelSize: Style.font.bodySmall
+            property int dlPct: root.dlPercent(trackRow.videoId)
+            text: dlPct >= 0 ? (dlPct + "%") : "󰇚"
+            color: dlPct >= 0 ? root.accent : (dlArea.containsMouse ? root.ink : root.muted)
+            font.family: dlPct >= 0 ? root.uiFont : root.iconFont
+            font.pixelSize: dlPct >= 0 ? Style.font.caption : Style.font.bodySmall
             scale: dlArea.containsMouse ? 1.12 : 1.0
             transformOrigin: Item.Center
             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-            MouseArea { id: dlArea; anchors.fill: parent; anchors.margins: -Style.space(4); hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.downloadTrack(trackRow.index) }
+            MouseArea {
+              id: dlArea
+              anchors.fill: parent
+              anchors.margins: -Style.space(4)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: dlPct >= 0 ? root.dlCancel(trackRow.videoId) : root.downloadTrack(trackRow.index)
+            }
           }
         }
       }

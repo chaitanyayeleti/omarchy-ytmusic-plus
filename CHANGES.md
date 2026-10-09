@@ -7,6 +7,21 @@ the local work, newest first.
 
 ---
 
+## v2.7.0 — Downloads manager
+
+- Backend: per-video `dl-get` lock (duplicate taps can't spawn parallel
+  yt-dlp); downloads dropped from the global playback lock so queue/next/
+  stop stay responsive; `dl-status` (lock-free JSON feed, stale entries
+  reaped to failed/interrupted); `dl-cancel` (SIGTERM the yt-dlp process
+  group incl. ffmpeg, SIGKILL fallback, partial cleanup, pid-reuse guard);
+  progress parsed from yt-dlp's stdout template, throttled to whole %.
+- UI: Local-tab manager rows with progress bar/%/speed/eta, retry (↻) and
+  cancel/dismiss (×); track-row download buttons turn into live NN%
+  (click cancels); the downloaded list auto-reloads when a transfer ends.
+- Tests: +8 checks (33 total) for the manager mechanics.
+
+---
+
 ## v2.6.0 — Tidy release
 
 - `test/run.sh`: in-repo offline regression suite (fake HOME/XDG sandbox,

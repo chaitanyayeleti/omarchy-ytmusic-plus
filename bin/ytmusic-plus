@@ -37,6 +37,11 @@ SLEEP_MODE_FILE="$RUNTIME_DIR/sleep_mode"
 # throttled status polls for the position). session-restore replays it.
 SESSION_FILE="$DATA_DIR/session.json"
 
+# Transient downloads-manager state (one JSON per in-flight/failed download):
+# live progress for the UI, the yt-dlp pid for cancel, and the last error for
+# retry. Runtime only — a reboot mid-download leaves nothing behind.
+DL_STATE_DIR="$RUNTIME_DIR/downloads"
+
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-ytmusic-plus"
 MUSIC_DIR="$HOME/Music/ytmusic-plus"
 
@@ -47,7 +52,7 @@ SESSION_MAX_BYTES=524288   # 512 KB — refuse to persist/slurp absurd sessions
 ART_CACHE_MAX_BYTES=1048576 # 1 MB cover-art thumbnails
 RESUME_MAX_AGE=2592000     # 30 days — older saved positions are not resumed
 
-mkdir -p "$RUNTIME_DIR" "$DATA_DIR" "$PL_DIR" "$CACHE_DIR" "$MUSIC_DIR"
+mkdir -p "$RUNTIME_DIR" "$DATA_DIR" "$PL_DIR" "$CACHE_DIR" "$MUSIC_DIR" "$DL_STATE_DIR"
 # Runtime holds the mpv socket + playback state: keep it private even when
 # XDG_RUNTIME_DIR is unset and we fall back to /tmp (sticky-bit dir shared
 # with other users). Data/cache dirs intentionally keep default perms.
@@ -280,6 +285,87 @@ pl_name_ok() { [[ "${1:-}" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; }
 dl_path_for() { printf '%s/%s.opus' "$MUSIC_DIR" "$1"; }
 
 is_downloaded() { [[ -s "$(dl_path_for "$1")" ]]; }
+
+# ---- downloads manager state ----------------------------------------------
+# One small JSON per video under $DL_STATE_DIR: state downloading|failed,
+# progress 0-100, speed/eta strings, the yt-dlp pid (for cancel), and the
+# metadata needed to retry without asking the UI again.
+dl_state_file() { printf '%s/%s.json' "$DL_STATE_DIR" "$1"; }
+
+dl_state_start() { # vid title artist thumb duration is_live pid
+  local vid="$1" f tmp
+  f="$(dl_state_file "$vid")"
+  tmp="$f.tmp.$$"
+  if jq -cn --arg v "$vid" --arg t "$2" --arg a "$3" --arg th "$4" --arg d "$5" \
+      --argjson l "$6" --argjson pid "$7" \
+      '{videoId:$v,state:"downloading",progress:0,speed:"",eta:"",
+        title:$t,artist:$a,thumbnail:$th,duration:$d,isLive:$l,
+        pid:$pid,at:(now|floor)}' >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    mv -- "$tmp" "$f"
+  else
+    rm -f -- "$tmp"
+  fi
+}
+
+dl_state_progress() { # vid percent speed eta — no-op unless still downloading
+  local vid="$1" f tmp
+  f="$(dl_state_file "$vid")"
+  tmp="$f.tmp.$$"
+  if jq -c --argjson p "$2" --arg sp "$3" --arg et "$4" \
+      'if .state == "downloading" then .progress=$p | .speed=$sp | .eta=$et else . end' \
+      "$f" >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    mv -- "$tmp" "$f"
+  else
+    rm -f -- "$tmp"
+  fi
+}
+
+dl_state_fail() { # vid error — keeps the entry so the UI can offer retry
+  local vid="$1" f tmp
+  f="$(dl_state_file "$vid")"
+  tmp="$f.tmp.$$"
+  if jq -c --arg e "$2" \
+      '.state="failed" | .error=$e | .at=(now|floor)' "$f" >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    mv -- "$tmp" "$f"
+  elif jq -cn --arg v "$vid" --arg e "$2" \
+      '{videoId:$v,state:"failed",progress:0,title:"Untitled",error:$e,at:(now|floor)}' >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    mv -- "$tmp" "$f"
+  else
+    rm -f -- "$tmp"
+  fi
+}
+
+dl_state_clear() { rm -f -- "$(dl_state_file "$1")" 2>/dev/null || true; }
+
+# yt-dlp progress-line filter ("YTM| 77.8%|1.2MiB/s|00:05", on stdout).
+# The percent is reduced to its integer part; writes are throttled to
+# whole-percent changes so a fast download cannot hammer the disk.
+dl_progress_filter() {
+  local vid="$1" line pct sp et last=-1
+  while IFS= read -r line; do
+    case "$line" in
+      YTM\|*)
+        IFS='|' read -r _ pct sp et <<<"$line"
+        pct="${pct%%.*}"          # drop the decimal fraction first
+        pct="${pct//[!0-9]/}"     # then strip spaces / percent / any ANSI
+        [[ -n "$pct" ]] || pct=0
+        if (( pct != last )); then
+          last=$pct
+          dl_state_progress "$vid" "$pct" "$sp" "$et"
+        fi
+        ;;
+    esac
+  done
+}
+
+# Is $1 a live pid whose cmdline still mentions yt-dlp? Guards dl-cancel and
+# the dl-status reaper against pid reuse (never signal an unrelated process).
+dl_pid_is_ytdlp() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 1 )) || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'yt-dlp'
+}
 
 # -- privacy base flags for every yt-dlp call: no cookies, no browser
 # -- identity leak, capped retries/timeouts so a dead network fails fast
@@ -871,7 +957,7 @@ update_pick_highest_stable() {
 
 # Serialize playback mutations under one exclusive lock; status takes shared.
 case "${1:-}" in
-  queue|queue-clear|requeue|play|next|previous|stop|lib-save|lib-unsave|pl-create|pl-add|pl-remove|pl-delete|pl-play|dl-get|dl-remove|set|loop|shuffle|sleep|offset-nudge|offset-reset|font-install|font-reset|session-restore)
+  queue|queue-clear|requeue|play|next|previous|stop|lib-save|lib-unsave|pl-create|pl-add|pl-remove|pl-delete|pl-play|dl-remove|set|loop|shuffle|sleep|offset-nudge|offset-reset|font-install|font-reset|session-restore)
     require flock
     exec 9>"$RUNTIME_DIR/launch.lock"
     flock 9
@@ -1287,21 +1373,41 @@ case "${1:-}" in
   dl-get)
     vid="${2:-}"; valid_id "$vid" || exit 2
     if is_downloaded "$vid"; then printf 'cached %s\n' "$vid"; exit 0; fi
-    require yt-dlp
+    require yt-dlp; require jq
+    mkdir -p "$DL_STATE_DIR"
+    # One download per video, ever: a second tap must never spawn a duplicate
+    # yt-dlp writing the same .part file. Per-vid lock instead of the global
+    # playback lock so downloads never block queue/next/stop (and vice versa).
+    exec 8>"$DL_STATE_DIR/$vid.lock"
+    flock -n 8 || { printf 'already downloading %s\n' "$vid"; exit 0; }
     tmp_out="$MUSIC_DIR/.${vid}.part.opus"
     rm -f -- "$tmp_out"
     base=()
     mapfile -t base < <(ytdlp_base)
     aq=0; [[ "$(sget dlQuality)" == compact ]] && aq=5
+    dl_ok=1
     for client in android web; do
       # outtmpl forces a deterministic filename (no title-derived names, no
       # --exec shell): the result lands at $tmp_out (opus) or a sibling
-      # .part.* that the newest-file fallback below normalizes.
-      if yt-dlp "${base[@]}" --no-playlist -x --audio-format opus --audio-quality "$aq" \
-          --extractor-args "youtube:player_client=$client" \
-          --output "$MUSIC_DIR/.${vid}.part.%(ext)s" \
-          -- "https://www.youtube.com/watch?v=$vid" >/dev/null 2>&1; then
-        break
+      # .part.* that the newest-file fallback below normalizes. Progress is
+      # parsed from stdout via the template prefix; setsid gives yt-dlp (and
+      # its ffmpeg child) their own process group so dl-cancel can kill both.
+      setsid yt-dlp "${base[@]}" --no-playlist -x --audio-format opus --audio-quality "$aq" \
+        --extractor-args "youtube:player_client=$client" \
+        --newline --progress-template "download:YTM|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s" \
+        --output "$MUSIC_DIR/.${vid}.part.%(ext)s" \
+        -- "https://www.youtube.com/watch?v=$vid" \
+        > >(dl_progress_filter "$vid") 2>/dev/null &
+      dl_pid=$!
+      dl_state_start "$vid" "${3:-Untitled}" "${4:-YouTube}" "${5:-}" "${6:-}" \
+        "$([[ "${7:-false}" == true ]] && printf true || printf false)" "$dl_pid"
+      if wait "$dl_pid"; then dl_ok=0; break; fi
+      dl_ok=$?
+      # No state file left = dl-cancel got us: stop retrying clients and clean.
+      if [[ ! -e "$(dl_state_file "$vid")" ]]; then
+        rm -f -- "$MUSIC_DIR"/."${vid}".part.* 2>/dev/null || true
+        printf 'cancelled %s\n' "$vid"
+        exit 0
       fi
     done
     # Normalize: find newest part file (conversion may leave .webm + .opus).
@@ -1314,11 +1420,11 @@ case "${1:-}" in
     if [[ ! -s "$tmp_out" ]]; then
       # Don't litter .part files on failure.
       rm -f -- "$MUSIC_DIR"/."${vid}".part.* 2>/dev/null || true
+      dl_state_fail "$vid" "download failed (offline, blocked or removed?)"
       printf 'download failed: %s\n' "$vid" >&2
       exit 1
     fi
     mv -- "$tmp_out" "$(dl_path_for "$vid")"
-    require jq
     tmp="$DL_META.tmp"
     jq -c --arg v "$vid" --arg p "$(dl_path_for "$vid")" \
       --arg t "${3:-Untitled}" --arg a "${4:-YouTube}" --arg th "${5:-}" --arg d "${6:-}" \
@@ -1328,7 +1434,51 @@ case "${1:-}" in
     commit "$tmp" "$DL_META" || exit 1
     # resolved streams for this id are now redundant — drop the cache entry
     rm -f -- "$CACHE_DIR/stream-$(sha1 "$vid")"
+    dl_state_clear "$vid"
     printf 'downloaded %s\n' "$vid"
+    ;;
+  dl-status)
+    # JSON array of in-flight/failed downloads for the manager UI. Read-only
+    # and lock-free so it never waits behind a running download. Entries
+    # whose pid vanished (crash, kill, logout race) are reaped to `failed`.
+    require jq
+    mkdir -p "$DL_STATE_DIR"
+    for f in "$DL_STATE_DIR"/*.json; do
+      [[ -e "$f" ]] || continue
+      st="$(jq -r '.state // ""' "$f" 2>/dev/null || printf '')"
+      [[ "$st" == downloading ]] || continue
+      pid="$(jq -r '.pid // 0' "$f" 2>/dev/null || printf 0)"
+      dl_pid_is_ytdlp "$pid" && continue
+      dl_state_fail "$(basename -- "$f" .json)" "interrupted"
+    done
+    if compgen -G "$DL_STATE_DIR/*.json" >/dev/null 2>&1; then
+      jq -sc '.' "$DL_STATE_DIR"/*.json 2>/dev/null || printf '[]'
+    else
+      printf '[]'
+    fi
+    ;;
+  dl-cancel)
+    # Stop one download: SIGTERM the whole yt-dlp process group (yt-dlp +
+    # ffmpeg), wait briefly, SIGKILL leftovers, then drop the state entry and
+    # any partial files. The pid must still look like yt-dlp (pid-reuse guard).
+    require jq
+    vid="${2:-}"; valid_id "$vid" || exit 2
+    f="$(dl_state_file "$vid")"
+    [[ -s "$f" ]] || exit 0
+    pid="$(jq -r '.pid // 0' "$f" 2>/dev/null || printf 0)"
+    if dl_pid_is_ytdlp "$pid"; then
+      pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || printf '')"
+      if [[ "$pgid" == "$pid" ]]; then
+        kill -TERM -- "-$pid" 2>/dev/null || true
+      else
+        kill -TERM "$pid" 2>/dev/null || true
+      fi
+      for _ in {1..20}; do dl_pid_is_ytdlp "$pid" || break; sleep 0.1; done
+      dl_pid_is_ytdlp "$pid" && kill -KILL "$pid" 2>/dev/null || true
+    fi
+    dl_state_clear "$vid"
+    rm -f -- "$MUSIC_DIR"/."${vid}".part.* 2>/dev/null || true
+    printf 'cancelled %s\n' "$vid"
     ;;
   dl-list)
     require jq
@@ -1342,6 +1492,7 @@ case "${1:-}" in
     require jq
     vid="${2:-}"; valid_id "$vid" || exit 2
     rm -f -- "$(dl_path_for "$vid")"
+    dl_state_clear "$vid"
     tmp="$DL_META.tmp"
     jq -c --arg v "$vid" 'del(.[$v])' "$DL_META" >"$tmp" || exit 1
     commit "$tmp" "$DL_META" || exit 1

@@ -178,5 +178,48 @@ check "fresh restore no-op" test -z "$("$CLI" session-restore)"
 "$CLI" queue '[]' 0 >/dev/null
 check "empty queue leaves nothing running" test "$(status_field .running)" = "false"
 
+# ---- downloads manager (offline mechanics) --------------------------------
+SD="$R/downloads"
+mkdir -p "$SD"
+
+check "dl-status starts empty" test "$("$CLI" dl-status)" = "[]"
+
+# A second tap during a live transfer must never spawn a duplicate yt-dlp:
+# hold the per-vid lock and expect a polite refusal without any network use.
+# (vid_c has no local file, so the "cached" short-circuit cannot mask this.)
+vid_c="CCCCCCCCCCC"
+( flock -x 8; sleep 3 ) 8>"$SD/$vid_c.lock" &
+guard_pid=$!
+sleep 0.3
+dup_out="$("$CLI" dl-get "$vid_c" "X" "Y" "" "" false)"
+if [[ "$dup_out" == "already downloading $vid_c" ]]; then
+  ok "duplicate dl-get refused while locked"
+else
+  bad "duplicate dl-get refused while locked (got: '$dup_out')"
+fi
+wait "$guard_pid" 2>/dev/null || true
+
+# A "downloading" entry whose pid is not a live yt-dlp (crash, kill, pid
+# reuse) must be reaped to failed instead of spinning forever.
+sleep 5 &
+fake_pid=$!
+jq -cn --arg v "$vid_a" --argjson pid "$fake_pid" \
+  '{videoId:$v,state:"downloading",progress:42,speed:"1MiB/s",eta:"00:03",title:"Fake",pid:$pid}' \
+  >"$SD/$vid_a.json"
+reaped="$("$CLI" dl-status | jq -r '.[0].state + ":" + (.[0].error // "")')"
+check "stale download reaped to failed:interrupted" test "$reaped" = "failed:interrupted"
+kill "$fake_pid" 2>/dev/null || true
+
+check "dl-cancel dismisses the failed entry" \
+  test "$("$CLI" dl-cancel "$vid_a")" = "cancelled $vid_a"
+check "dl-cancel removed the state file" test ! -e "$SD/$vid_a.json"
+check "dl-status empty after cancel" test "$("$CLI" dl-status)" = "[]"
+check "dl-cancel on an unknown id is a no-op" test -z "$("$CLI" dl-cancel "$vid_b")"
+
+# dl-remove clears any leftover state entry for the same video.
+jq -cn --arg v "$vid_b" '{videoId:$v,state:"failed",progress:0,title:"B"}' >"$SD/$vid_b.json"
+"$CLI" dl-remove "$vid_b" >/dev/null
+check "dl-remove clears the state entry" test ! -e "$SD/$vid_b.json"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 (( FAIL == 0 ))
